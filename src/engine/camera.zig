@@ -124,3 +124,11 @@ test "U04 pan_updates_camera" {
     try std.testing.expectEqual(@as(f32, -40), camera.pan_x);
     try std.testing.expectEqual(@as(f32, 20), camera.pan_y);
 }
+
+test "U18 camera_snapshot_isolation" {
+    var camera = Camera.init(800, 600, 0.125, 8);
+    const snapshot = camera.uniform();
+    camera.pan(40, 20);
+    try std.testing.expectEqual(@as(f32, 0), snapshot.transform[4]);
+    try std.testing.expectEqual(@as(f32, 0), snapshot.transform[5]);
+}

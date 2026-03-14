@@ -8,6 +8,7 @@ pub const shared = struct {
 pub const engine = struct {
     pub const api = @import("engine/api.zig");
     pub const camera = @import("engine/camera.zig");
+    pub const reference_renderer = @import("engine/reference_renderer.zig");
     pub const scene = @import("engine/scene.zig");
 };
 
@@ -81,4 +82,5 @@ pub export fn ite_engine_get_last_error(engine_ptr: *const Engine) [*:0]const u8
 
 test {
     std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(engine.reference_renderer);
 }

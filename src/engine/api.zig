@@ -138,3 +138,30 @@ pub fn getStats(engine_ptr: *const Engine, out_stats: *abi.FrameStats) abi.Engin
 pub fn getLastError(engine_ptr: *const Engine) [*:0]const u8 {
     return @ptrCast(&fromOpaqueConst(engine_ptr).last_error);
 }
+
+test "U16 engine_state_machine" {
+    var engine_ptr: ?*Engine = null;
+    const config = abi.EngineConfig{
+        .max_rects = 8,
+        .max_visible_rects = 8,
+        .initial_width_px = 64,
+        .initial_height_px = 64,
+    };
+    try std.testing.expectEqual(abi.EngineStatus.ok, create(&engine_ptr, &config));
+    defer destroy(engine_ptr);
+    try std.testing.expectEqual(abi.EngineStatus.not_initialized, render(engine_ptr.?, null));
+    try std.testing.expectEqual(abi.EngineStatus.ok, init(engine_ptr.?, null, null, null));
+    try std.testing.expectEqual(abi.EngineStatus.ok, render(engine_ptr.?, null));
+}
+
+test "U17 steady_state_no_alloc" {
+    var scene = try scene_mod.Scene.init(std.testing.allocator, 8, 8);
+    defer scene.deinit();
+    const rects = [_]abi.Rect{
+        .{ .x = 0, .y = 0, .w = 10, .h = 10, .color_rgba8 = 1 },
+    };
+    try std.testing.expectEqual(abi.EngineStatus.ok, scene.replaceRects(&rects));
+    const camera = camera_mod.Camera.init(64, 64, 0.125, 8);
+    try std.testing.expectEqual(abi.EngineStatus.ok, scene.buildVisibleSet(camera));
+    try std.testing.expectEqual(@as(usize, 1), scene.visible().len);
+}
