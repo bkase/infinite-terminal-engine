@@ -18,6 +18,14 @@ Commit gate:
 - `zig build test-gpu`
 - `zig build host`
 
+Shader staging contract:
+
+- `build.zig` owns the named shader steps: `shader-air`, `shader-metallib`, and `shader`
+- `zig build shader-air` installs `zig-out/shaders/rect_fill.air`
+- `zig build shader-metallib` installs `zig-out/shaders/rect_fill.metallib`
+- `zig build shader` stages `host/DemoApp/Resources/rect_fill.metallib`
+- `zig build test-gpu` and `zig build host` depend on the staged metallib path above
+
 Demo gate:
 
 - `scripts/verify-demo.sh`
