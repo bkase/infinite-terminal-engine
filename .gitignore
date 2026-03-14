@@ -1,0 +1,23 @@
+.DS_Store
+.build/
+.swiftpm/
+Package.resolved
+
+# Editor state
+.idea/
+.vscode/
+
+# Runtime and coverage artifacts
+*.log
+*.profdata
+*.profraw
+.coverage/
+
+# Temporary files
+*.swp
+*.tmp
+
+# beads runtime scratch
+.beads/.br_history/
+
+ghostty/
