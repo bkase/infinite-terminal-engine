@@ -29,8 +29,8 @@ final class EngineRuntime: ObservableObject {
             max_visible_rects: 512,
             initial_width_px: 1280,
             initial_height_px: 720,
-            min_zoom: 0.125,
-            max_zoom: 8
+            min_zoom: 1.0e-9,
+            max_zoom: 1.0e9
         )
         precondition(bindings.create(&handle, &config) == ite_EngineStatus_ok)
         engine = handle

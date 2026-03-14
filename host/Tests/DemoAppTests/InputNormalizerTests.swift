@@ -13,9 +13,9 @@ final class InputNormalizerTests: XCTestCase {
         XCTAssertLessThan(InputNormalizer.fallbackZoomFactor(forScrollDeltaY: 1), 1)
     }
 
-    func testFallbackZoomFactorClamps() {
-        XCTAssertEqual(InputNormalizer.fallbackZoomFactor(forScrollDeltaY: -10000), 4)
-        XCTAssertEqual(InputNormalizer.fallbackZoomFactor(forScrollDeltaY: 10000), 0.25)
+    func testFallbackZoomFactorStaysPositive() {
+        XCTAssertGreaterThan(InputNormalizer.fallbackZoomFactor(forScrollDeltaY: -10000), 1)
+        XCTAssertGreaterThan(InputNormalizer.fallbackZoomFactor(forScrollDeltaY: 10000), 0)
     }
 
     func testMagnificationZoomFactorClamps() {

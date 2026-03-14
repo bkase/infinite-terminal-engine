@@ -36,13 +36,16 @@ pub const EngineStatus = enum(c_int) {
 
 /// Static engine configuration chosen at creation time.
 pub const EngineConfig = extern struct {
+    pub const default_min_zoom: f32 = 1.0e-9;
+    pub const default_max_zoom: f32 = 1.0e9;
+
     abi_version: u32 = ABI_VERSION,
     max_rects: u32,
     max_visible_rects: u32,
     initial_width_px: u32,
     initial_height_px: u32,
-    min_zoom: f32 = 0.125,
-    max_zoom: f32 = 8.0,
+    min_zoom: f32 = default_min_zoom,
+    max_zoom: f32 = default_max_zoom,
 };
 
 /// Frame diagnostics reported back to the host application.

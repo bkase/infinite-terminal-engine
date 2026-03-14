@@ -19,20 +19,25 @@ pub const ViewBounds = struct {
 
 /// Mutable camera state stored by the engine.
 pub const Camera = struct {
+    pub const safety_min_zoom: f32 = abi.EngineConfig.default_min_zoom;
+    pub const safety_max_zoom: f32 = abi.EngineConfig.default_max_zoom;
+
     pan_x: f32 = 0,
     pan_y: f32 = 0,
     zoom: f32 = 1,
-    min_zoom: f32 = 0.125,
-    max_zoom: f32 = 8,
+    min_zoom: f32 = safety_min_zoom,
+    max_zoom: f32 = safety_max_zoom,
     width_px: u32,
     height_px: u32,
 
     pub fn init(width_px: u32, height_px: u32, min_zoom: f32, max_zoom: f32) Camera {
+        const normalized_min_zoom = normalizeMinZoom(min_zoom);
+        const normalized_max_zoom = normalizeMaxZoom(max_zoom, normalized_min_zoom);
         return .{
             .width_px = width_px,
             .height_px = height_px,
-            .min_zoom = min_zoom,
-            .max_zoom = max_zoom,
+            .min_zoom = normalized_min_zoom,
+            .max_zoom = normalized_max_zoom,
         };
     }
 
@@ -47,12 +52,27 @@ pub const Camera = struct {
     }
 
     pub fn zoomBy(self: *Camera, delta: f32, anchor_x_px: f32, anchor_y_px: f32) void {
+        if (!std.math.isFinite(delta) or delta <= 0) return;
         const before = self.screenToCanvas(anchor_x_px, anchor_y_px);
         const unclamped = self.zoom * delta;
-        self.zoom = std.math.clamp(unclamped, self.min_zoom, self.max_zoom);
+        if (!std.math.isFinite(unclamped)) {
+            self.zoom = if (delta > 1) self.max_zoom else self.min_zoom;
+        } else {
+            self.zoom = std.math.clamp(unclamped, self.min_zoom, self.max_zoom);
+        }
         const after = self.screenToCanvas(anchor_x_px, anchor_y_px);
         self.pan_x += before.x - after.x;
         self.pan_y += before.y - after.y;
+    }
+
+    fn normalizeMinZoom(candidate: f32) f32 {
+        if (!std.math.isFinite(candidate) or candidate <= 0) return safety_min_zoom;
+        return @max(candidate, safety_min_zoom);
+    }
+
+    fn normalizeMaxZoom(candidate: f32, min_zoom: f32) f32 {
+        if (!std.math.isFinite(candidate) or candidate <= 0) return safety_max_zoom;
+        return @max(candidate, min_zoom);
     }
 
     pub fn canvasToScreen(self: Camera, canvas_x: f32, canvas_y: f32) Point {
@@ -121,6 +141,20 @@ test "U03 zoom_clamped" {
     try std.testing.expectEqual(@as(f32, 2), camera.zoom);
     camera.zoomBy(0.001, 0, 0);
     try std.testing.expectEqual(@as(f32, 0.5), camera.zoom);
+}
+
+test "U20 invalid_zoom_limits_fall_back_to_safety_range" {
+    const camera = Camera.init(800, 600, -1, 0);
+    try std.testing.expectEqual(Camera.safety_min_zoom, camera.min_zoom);
+    try std.testing.expectEqual(Camera.safety_max_zoom, camera.max_zoom);
+}
+
+test "U21 default_zoom_range_supports_effectively_unbounded_navigation" {
+    var camera = Camera.init(800, 600, abi.EngineConfig.default_min_zoom, abi.EngineConfig.default_max_zoom);
+    camera.zoomBy(1.0e6, 0, 0);
+    try std.testing.expectApproxEqAbs(@as(f32, 1.0e6), camera.zoom, 0.5);
+    camera.zoomBy(1.0e-18, 0, 0);
+    try std.testing.expectEqual(abi.EngineConfig.default_min_zoom, camera.zoom);
 }
 
 test "U04 pan_updates_camera" {
