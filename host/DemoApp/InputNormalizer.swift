@@ -2,9 +2,8 @@ import AppKit
 import CoreGraphics
 
 enum InputNormalizer {
-    static func panDelta(for event: NSEvent) -> CGSize {
-        let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 12
-        return CGSize(width: event.scrollingDeltaX * multiplier, height: event.scrollingDeltaY * multiplier)
+    static func panDelta(from start: CGPoint, to end: CGPoint) -> CGSize {
+        CGSize(width: end.x - start.x, height: end.y - start.y)
     }
 
     static func zoomFactor(forMagnification magnification: CGFloat) -> Float {
@@ -12,6 +11,8 @@ enum InputNormalizer {
     }
 
     static func fallbackZoomFactor(forScrollDeltaY deltaY: CGFloat) -> Float {
-        deltaY < 0 ? 1.1 : 0.9
+        let step = deltaY / 240
+        let unclamped = pow(1.25, -step)
+        return Float(max(0.25, min(4, unclamped)))
     }
 }
