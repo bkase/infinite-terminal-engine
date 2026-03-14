@@ -11,6 +11,11 @@ Verification entrypoints:
 
 - `scripts/install-hooks.sh`
 - `scripts/stage-engine-header.sh`
+- `scripts/verify-packaging.sh`
 - `zig build doctor`
 - `zig build ci`
 - `scripts/verify-demo.sh`
+
+Run locally:
+
+- `swift run DemoApp`

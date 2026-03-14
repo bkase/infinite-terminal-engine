@@ -17,6 +17,7 @@ Commit gate:
 - `zig build test-integration-cpu`
 - `zig build test-gpu`
 - `zig build host`
+- `scripts/verify-packaging.sh`
 
 Shader staging contract:
 
@@ -28,5 +29,9 @@ Shader staging contract:
 Demo gate:
 
 - `scripts/verify-demo.sh`
+
+Manual signoff:
+
+- `docs/demo-signoff.md`
 
 The repo-managed pre-commit hook runs `scripts/verify-commit.sh`.

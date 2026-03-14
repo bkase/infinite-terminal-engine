@@ -5,4 +5,5 @@ set -eu
 ensure_repo_root
 
 scripts/verify-commit.sh
+scripts/verify-packaging.sh
 Scripts/swiftpm-cache.sh build -c release
