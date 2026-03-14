@@ -10,3 +10,4 @@ ghostty/
 host/.build/
 host/.swiftpm/
 host/DemoApp/Resources/*.metallib
+host/DemoApp/Resources/*.dylib

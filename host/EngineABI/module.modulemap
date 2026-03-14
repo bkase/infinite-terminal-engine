@@ -1,0 +1,4 @@
+module EngineABI [system] {
+    header "../../include/engine.h"
+    export *
+}

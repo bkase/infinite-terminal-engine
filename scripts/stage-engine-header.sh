@@ -5,6 +5,7 @@ set -eu
 ensure_repo_root
 
 mkdir -p include zig-out/include zig-out/lib
+mkdir -p host/DemoApp/Resources
 cp include/engine.h zig-out/include/engine.h
 zig build-lib \
   src/root.zig \
@@ -15,3 +16,4 @@ zig build-lib \
   -framework Metal \
   -framework QuartzCore \
   -femit-bin=zig-out/lib/libengine.dylib
+cp zig-out/lib/libengine.dylib host/DemoApp/Resources/libengine.dylib

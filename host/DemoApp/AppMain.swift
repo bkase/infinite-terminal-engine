@@ -1,16 +1,18 @@
-import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    @StateObject private var runtime = EngineRuntime()
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Infinite Terminal Engine")
-                .font(.title2)
-            Text("Host shell scaffold")
-                .foregroundStyle(.secondary)
+        ZStack(alignment: .topLeading) {
+            CanvasView(runtime: runtime)
+            Text(runtime.statsSummary)
+                .font(.system(.caption, design: .monospaced))
+                .padding(10)
+                .background(.regularMaterial, in: Capsule())
+                .padding(12)
         }
-        .padding(24)
-        .frame(minWidth: 640, minHeight: 480)
+        .frame(minWidth: 900, minHeight: 600)
     }
 }
 

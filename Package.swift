@@ -10,12 +10,27 @@ let package = Package(
         .executable(name: "DemoApp", targets: ["DemoApp"]),
     ],
     targets: [
+        .systemLibrary(
+            name: "EngineABI",
+            path: "host/EngineABI"
+        ),
         .executableTarget(
             name: "DemoApp",
+            dependencies: ["EngineABI"],
             path: "host/DemoApp",
             resources: [
                 .copy("Resources"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Metal"),
+                .linkedFramework("MetalKit"),
+                .linkedFramework("AppKit"),
             ]
+        ),
+        .testTarget(
+            name: "DemoAppTests",
+            dependencies: ["DemoApp"],
+            path: "host/Tests"
         ),
     ]
 )
