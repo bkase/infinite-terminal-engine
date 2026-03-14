@@ -2,6 +2,7 @@
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <QuartzCore/CAMetalLayer.h>
 
 typedef struct IteMetalRenderer {
     id<MTLDevice> device;
@@ -81,12 +82,44 @@ void ite_metal_release_handle(void *handle) {
 void ite_metal_destroy_renderer(void *renderer_handle) {
     if (renderer_handle != NULL) {
         IteMetalRenderer *renderer = (IteMetalRenderer *)renderer_handle;
+        [renderer->device release];
+        [renderer->command_queue release];
+        [renderer->library release];
+        [renderer->pipeline release];
         renderer->device = nil;
         renderer->command_queue = nil;
         renderer->library = nil;
         renderer->pipeline = nil;
         free(renderer);
     }
+}
+
+static id<MTLCommandBuffer> ite_metal_create_command_buffer(id<MTLCommandQueue> command_queue, char *error_buf, size_t error_buf_len) {
+    id<MTLCommandBuffer> command_buffer = [command_queue commandBuffer];
+    if (command_buffer == nil) {
+        ite_write_error(error_buf, error_buf_len, @"unable to create command buffer");
+    }
+    return command_buffer;
+}
+
+static int ite_metal_finalize_command_buffer(
+    id<MTLCommandBuffer> command_buffer,
+    id<MTLDrawable> drawable,
+    char *error_buf,
+    size_t error_buf_len
+) {
+    if (drawable != nil) {
+        [command_buffer presentDrawable:drawable];
+    }
+
+    [command_buffer commit];
+    [command_buffer waitUntilCompleted];
+    if (command_buffer.error != nil) {
+        ite_write_error(error_buf, error_buf_len, command_buffer.error.localizedDescription ?: @"command buffer failed");
+        return 0;
+    }
+
+    return 1;
 }
 
 void *ite_metal_create_renderer(void *device_handle, void *command_queue_handle, void *library_handle, char *error_buf, size_t error_buf_len) {
@@ -118,9 +151,9 @@ void *ite_metal_create_renderer(void *device_handle, void *command_queue_handle,
     }
 
     IteMetalRenderer *renderer = calloc(1, sizeof(IteMetalRenderer));
-    renderer->device = device;
-    renderer->command_queue = command_queue;
-    renderer->library = library;
+    renderer->device = [device retain];
+    renderer->command_queue = [command_queue retain];
+    renderer->library = [library retain];
     renderer->pipeline = pipeline;
     return renderer;
 }
@@ -133,14 +166,48 @@ int ite_metal_present_drawable(void *command_queue_handle, void *drawable_handle
         return 0;
     }
 
-    id<MTLCommandBuffer> command_buffer = [command_queue commandBuffer];
-    [command_buffer presentDrawable:drawable];
-    [command_buffer commit];
-    [command_buffer waitUntilCompleted];
-    if (command_buffer.error != nil) {
-        ite_write_error(error_buf, error_buf_len, command_buffer.error.localizedDescription ?: @"drawable present failed");
+    id<MTLCommandBuffer> command_buffer = ite_metal_create_command_buffer(command_queue, error_buf, error_buf_len);
+    if (command_buffer == nil) {
         return 0;
     }
+
+    return ite_metal_finalize_command_buffer(command_buffer, drawable, error_buf, error_buf_len);
+}
+
+static int ite_metal_renderer_encode_draw(
+    IteMetalRenderer *renderer,
+    id<MTLCommandBuffer> command_buffer,
+    id<MTLTexture> texture,
+    const ite_CameraUniform *camera,
+    const ite_Rect *rects,
+    uint32_t rect_count,
+    char *error_buf,
+    size_t error_buf_len
+) {
+    if (renderer == NULL || command_buffer == nil || texture == nil || camera == NULL) {
+        ite_write_error(error_buf, error_buf_len, @"missing renderer draw arguments");
+        return 0;
+    }
+
+    MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
+    pass.colorAttachments[0].texture = texture;
+    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
+    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
+    pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
+
+    id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:pass];
+    if (encoder == nil) {
+        ite_write_error(error_buf, error_buf_len, @"unable to create render command encoder");
+        return 0;
+    }
+
+    [encoder setRenderPipelineState:renderer->pipeline];
+    [encoder setVertexBytes:camera length:sizeof(ite_CameraUniform) atIndex:0];
+    if (rect_count > 0) {
+        [encoder setVertexBytes:rects length:sizeof(ite_Rect) * rect_count atIndex:1];
+        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6 instanceCount:rect_count];
+    }
+    [encoder endEncoding];
 
     return 1;
 }
@@ -156,35 +223,44 @@ int ite_metal_renderer_draw(
 ) {
     IteMetalRenderer *renderer = (IteMetalRenderer *)renderer_handle;
     id<MTLTexture> texture = (__bridge id<MTLTexture>)texture_handle;
-    if (renderer == NULL || texture == nil || camera == NULL) {
-        ite_write_error(error_buf, error_buf_len, @"missing renderer draw arguments");
+    id<MTLCommandBuffer> command_buffer = ite_metal_create_command_buffer(renderer != NULL ? renderer->command_queue : nil, error_buf, error_buf_len);
+    if (command_buffer == nil) {
         return 0;
     }
 
-    id<MTLCommandBuffer> command_buffer = [renderer->command_queue commandBuffer];
-    MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
-    pass.colorAttachments[0].texture = texture;
-    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
-    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-    pass.colorAttachments[0].clearColor = MTLClearColorMake(0, 0, 0, 1);
-
-    id<MTLRenderCommandEncoder> encoder = [command_buffer renderCommandEncoderWithDescriptor:pass];
-    [encoder setRenderPipelineState:renderer->pipeline];
-    [encoder setVertexBytes:camera length:sizeof(ite_CameraUniform) atIndex:0];
-    if (rect_count > 0) {
-        [encoder setVertexBytes:rects length:sizeof(ite_Rect) * rect_count atIndex:1];
-        [encoder drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6 instanceCount:rect_count];
-    }
-    [encoder endEncoding];
-    [command_buffer commit];
-    [command_buffer waitUntilCompleted];
-
-    if (command_buffer.error != nil) {
-        ite_write_error(error_buf, error_buf_len, command_buffer.error.localizedDescription ?: @"command buffer failed");
+    if (!ite_metal_renderer_encode_draw(renderer, command_buffer, texture, camera, rects, rect_count, error_buf, error_buf_len)) {
         return 0;
     }
 
-    return 1;
+    return ite_metal_finalize_command_buffer(command_buffer, nil, error_buf, error_buf_len);
+}
+
+int ite_metal_renderer_draw_to_drawable(
+    void *renderer_handle,
+    void *drawable_handle,
+    const ite_CameraUniform *camera,
+    const ite_Rect *rects,
+    uint32_t rect_count,
+    char *error_buf,
+    size_t error_buf_len
+) {
+    IteMetalRenderer *renderer = (IteMetalRenderer *)renderer_handle;
+    id<CAMetalDrawable> drawable = (__bridge id<CAMetalDrawable>)drawable_handle;
+    if (drawable == nil) {
+        ite_write_error(error_buf, error_buf_len, @"missing drawable");
+        return 0;
+    }
+
+    id<MTLCommandBuffer> command_buffer = ite_metal_create_command_buffer(renderer != NULL ? renderer->command_queue : nil, error_buf, error_buf_len);
+    if (command_buffer == nil) {
+        return 0;
+    }
+
+    if (!ite_metal_renderer_encode_draw(renderer, command_buffer, drawable.texture, camera, rects, rect_count, error_buf, error_buf_len)) {
+        return 0;
+    }
+
+    return ite_metal_finalize_command_buffer(command_buffer, drawable, error_buf, error_buf_len);
 }
 
 int ite_metal_texture_read_rgba8(

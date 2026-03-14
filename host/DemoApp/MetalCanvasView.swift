@@ -21,7 +21,7 @@ final class MetalCanvasView: MTKView {
     override func mouseDragged(with event: NSEvent) {
         let currentPoint = convert(event.locationInWindow, from: nil)
         guard let dragStartPoint else {
-            self.dragStartPoint = currentPoint;
+            self.dragStartPoint = currentPoint
             return
         }
         inputHandler?.canvasDidPan(delta: InputNormalizer.panDelta(from: dragStartPoint, to: currentPoint))

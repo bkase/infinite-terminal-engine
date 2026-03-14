@@ -19,7 +19,6 @@ final class EngineRuntime: ObservableObject {
     nonisolated(unsafe) private var engine: OpaquePointer?
     private var didInitialize = false
     private var queue: MTLCommandQueue?
-    private var presentError = [CChar](repeating: 0, count: 256)
 
     init() {
         var handle: OpaquePointer?
@@ -81,30 +80,13 @@ final class EngineRuntime: ObservableObject {
         _ = bindings.zoom(engine, factor, Float(anchor.x), Float(anchor.y))
     }
 
-    func render(texture: MTLTexture) {
+    func render(drawable: CAMetalDrawable) {
         guard let engine else { return }
-        let status = bindings.render(engine, Unmanaged.passUnretained(texture).toOpaque())
+        let status = bindings.render(engine, Unmanaged.passUnretained(drawable).toOpaque())
         if status == ite_EngineStatus_ok {
             updateStats()
         } else if let error = bindings.getLastError(engine) {
             statsSummary = String(cString: error)
-        }
-    }
-
-    func present(drawable: CAMetalDrawable) {
-        guard let queue else { return }
-        presentError.withUnsafeMutableBufferPointer { buffer in
-            _ = bindings.presentDrawable(
-                Unmanaged.passUnretained(queue).toOpaque(),
-                Unmanaged.passUnretained(drawable).toOpaque(),
-                buffer.baseAddress,
-                buffer.count
-            )
-        }
-        if presentError[0] != 0 {
-            let end = presentError.firstIndex(of: 0) ?? presentError.endIndex
-            statsSummary = String(decoding: presentError[..<end].map(UInt8.init(bitPattern:)), as: UTF8.self)
-            presentError = [CChar](repeating: 0, count: 256)
         }
     }
 

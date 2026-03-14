@@ -24,6 +24,15 @@ int ite_metal_renderer_draw(
     char *error_buf,
     size_t error_buf_len
 );
+int ite_metal_renderer_draw_to_drawable(
+    void *renderer,
+    void *drawable,
+    const ite_CameraUniform *camera,
+    const ite_Rect *rects,
+    uint32_t rect_count,
+    char *error_buf,
+    size_t error_buf_len
+);
 int ite_metal_texture_read_rgba8(
     void *texture,
     uint8_t *out_pixels,

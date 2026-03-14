@@ -28,6 +28,15 @@ extern fn ite_metal_renderer_draw(
     error_buf: [*]u8,
     error_buf_len: usize,
 ) c_int;
+extern fn ite_metal_renderer_draw_to_drawable(
+    renderer: ?*anyopaque,
+    drawable: ?*anyopaque,
+    camera: *const abi.CameraUniform,
+    rects: [*]const abi.Rect,
+    rect_count: u32,
+    error_buf: [*]u8,
+    error_buf_len: usize,
+) c_int;
 extern fn ite_metal_release_handle(handle: ?*anyopaque) void;
 extern fn ite_metal_destroy_renderer(renderer: ?*anyopaque) void;
 
@@ -169,20 +178,13 @@ pub fn zoom(engine_ptr: *Engine, delta: f32, anchor_x_px: f32, anchor_y_px: f32)
 
 pub fn render(engine_ptr: *Engine, drawable_texture: ?*anyopaque) abi.EngineStatus {
     const state = fromOpaque(engine_ptr);
-    if (!state.initialized) {
-        setError(state, "render requires ite_engine_init first");
-        return .not_initialized;
-    }
-    if (state.renderer == null or drawable_texture == null) {
+    const status = prepareRender(state);
+    if (status != .ok) return status;
+    if (drawable_texture == null) {
         setError(state, "render requires renderer and target texture");
         return .invalid_arg;
     }
-    state.active_camera = state.pending_camera;
-    const status = state.scene.buildVisibleSet(state.active_camera);
-    if (status != .ok) {
-        setError(state, "visible set capacity exceeded");
-        return status;
-    }
+
     const camera_uniform = state.active_camera.uniform();
     if (ite_metal_renderer_draw(
         state.renderer,
@@ -193,12 +195,29 @@ pub fn render(engine_ptr: *Engine, drawable_texture: ?*anyopaque) abi.EngineStat
         &state.last_error,
         state.last_error.len,
     ) == 0) return .gpu_error;
-    state.stats.total_rects = @intCast(state.scene.count);
-    state.stats.visible_rects = @intCast(state.scene.visible_count);
-    state.stats.width_px = state.active_camera.width_px;
-    state.stats.height_px = state.active_camera.height_px;
-    setError(state, "");
-    return .ok;
+    return finishRender(state);
+}
+
+pub fn renderDrawable(engine_ptr: *Engine, drawable: ?*anyopaque) abi.EngineStatus {
+    const state = fromOpaque(engine_ptr);
+    const status = prepareRender(state);
+    if (status != .ok) return status;
+    if (drawable == null) {
+        setError(state, "render requires renderer and drawable");
+        return .invalid_arg;
+    }
+
+    const camera_uniform = state.active_camera.uniform();
+    if (ite_metal_renderer_draw_to_drawable(
+        state.renderer,
+        drawable,
+        &camera_uniform,
+        state.scene.visible_rects.ptr,
+        @intCast(state.scene.visible_count),
+        &state.last_error,
+        state.last_error.len,
+    ) == 0) return .gpu_error;
+    return finishRender(state);
 }
 
 pub fn getStats(engine_ptr: *const Engine, out_stats: *abi.FrameStats) abi.EngineStatus {
@@ -208,6 +227,35 @@ pub fn getStats(engine_ptr: *const Engine, out_stats: *abi.FrameStats) abi.Engin
 
 pub fn getLastError(engine_ptr: *const Engine) [*:0]const u8 {
     return @ptrCast(&fromOpaqueConst(engine_ptr).last_error);
+}
+
+fn prepareRender(state: *EngineImpl) abi.EngineStatus {
+    if (!state.initialized) {
+        setError(state, "render requires ite_engine_init first");
+        return .not_initialized;
+    }
+    if (state.renderer == null) {
+        setError(state, "render requires ite_engine_init first");
+        return .invalid_arg;
+    }
+
+    state.active_camera = state.pending_camera;
+    const status = state.scene.buildVisibleSet(state.active_camera);
+    if (status != .ok) {
+        setError(state, "visible set capacity exceeded");
+        return status;
+    }
+
+    return .ok;
+}
+
+fn finishRender(state: *EngineImpl) abi.EngineStatus {
+    state.stats.total_rects = @intCast(state.scene.count);
+    state.stats.visible_rects = @intCast(state.scene.visible_count);
+    state.stats.width_px = state.active_camera.width_px;
+    state.stats.height_px = state.active_camera.height_px;
+    setError(state, "");
+    return .ok;
 }
 
 test "U16 engine_state_machine" {

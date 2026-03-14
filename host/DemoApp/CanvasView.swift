@@ -12,7 +12,6 @@ struct CanvasView: NSViewRepresentable {
     func makeNSView(context: Context) -> MetalCanvasView {
         let view = MetalCanvasView(frame: .zero, device: MTLCreateSystemDefaultDevice())
         guard let device = view.device else { return view }
-        view.framebufferOnly = false
         view.clearColor = MTLClearColorMake(0.04, 0.05, 0.06, 1)
         view.colorPixelFormat = .rgba8Unorm
         view.preferredFramesPerSecond = 120
@@ -47,8 +46,7 @@ struct CanvasView: NSViewRepresentable {
 
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable else { return }
-            runtime.render(texture: drawable.texture)
-            runtime.present(drawable: drawable)
+            runtime.render(drawable: drawable)
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {

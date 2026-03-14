@@ -83,6 +83,13 @@ pub export fn ite_engine_render(
     return engine.api.render(engine_ptr, drawable_texture);
 }
 
+pub export fn ite_engine_render_drawable(
+    engine_ptr: *Engine,
+    drawable: ?*anyopaque,
+) EngineStatus {
+    return engine.api.renderDrawable(engine_ptr, drawable);
+}
+
 pub export fn ite_engine_get_stats(engine_ptr: *const Engine, out_stats: *FrameStats) EngineStatus {
     return engine.api.getStats(engine_ptr, out_stats);
 }

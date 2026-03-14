@@ -59,6 +59,7 @@ ite_EngineStatus ite_engine_resize(struct ite_Engine *engine, uint32_t width_px,
 ite_EngineStatus ite_engine_pan(struct ite_Engine *engine, float delta_x_px, float delta_y_px);
 ite_EngineStatus ite_engine_zoom(struct ite_Engine *engine, float delta, float anchor_x_px, float anchor_y_px);
 ite_EngineStatus ite_engine_render(struct ite_Engine *engine, void *drawable_texture);
+ite_EngineStatus ite_engine_render_drawable(struct ite_Engine *engine, void *drawable);
 ite_EngineStatus ite_engine_get_stats(const struct ite_Engine *engine, ite_FrameStats *out_stats);
 const char *ite_engine_get_last_error(const struct ite_Engine *engine);
 

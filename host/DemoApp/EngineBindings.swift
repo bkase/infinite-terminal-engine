@@ -10,7 +10,6 @@ typealias EngineResizeFn = @convention(c) (OpaquePointer?, UInt32, UInt32) -> it
 typealias EnginePanFn = @convention(c) (OpaquePointer?, Float, Float) -> ite_EngineStatus
 typealias EngineZoomFn = @convention(c) (OpaquePointer?, Float, Float, Float) -> ite_EngineStatus
 typealias EngineRenderFn = @convention(c) (OpaquePointer?, UnsafeMutableRawPointer?) -> ite_EngineStatus
-typealias MetalPresentDrawableFn = @convention(c) (UnsafeMutableRawPointer?, UnsafeMutableRawPointer?, UnsafeMutablePointer<CChar>?, Int) -> Int32
 typealias EngineStatsFn = @convention(c) (OpaquePointer?, UnsafeMutablePointer<ite_FrameStats>?) -> ite_EngineStatus
 typealias EngineErrorFn = @convention(c) (OpaquePointer?) -> UnsafePointer<CChar>?
 typealias EngineVersionFn = @convention(c) () -> UInt32
@@ -27,7 +26,6 @@ final class EngineBindings: @unchecked Sendable {
     let pan: EnginePanFn
     let zoom: EngineZoomFn
     let render: EngineRenderFn
-    let presentDrawable: MetalPresentDrawableFn
     let getStats: EngineStatsFn
     let getLastError: EngineErrorFn
 
@@ -57,8 +55,7 @@ final class EngineBindings: @unchecked Sendable {
         resize = try load("ite_engine_resize", as: EngineResizeFn.self)
         pan = try load("ite_engine_pan", as: EnginePanFn.self)
         zoom = try load("ite_engine_zoom", as: EngineZoomFn.self)
-        render = try load("ite_engine_render", as: EngineRenderFn.self)
-        presentDrawable = try load("ite_metal_present_drawable", as: MetalPresentDrawableFn.self)
+        render = try load("ite_engine_render_drawable", as: EngineRenderFn.self)
         getStats = try load("ite_engine_get_stats", as: EngineStatsFn.self)
         getLastError = try load("ite_engine_get_last_error", as: EngineErrorFn.self)
     }
