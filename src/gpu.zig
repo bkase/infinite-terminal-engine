@@ -158,3 +158,31 @@ test "G10 gpu_repeated_render_stability" {
 
     try std.testing.expectEqualSlices(u8, first, second);
 }
+
+test "I08 render_updates_stats_from_active_snapshot" {
+    const engine = try createEngine(64, 64);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(64, 64);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    const rects = [_]root.Rect{
+        .{ .x = 8, .y = 8, .w = 12, .h = 12, .color_rgba8 = 0xffffffff },
+        .{ .x = 200, .y = 200, .w = 12, .h = 12, .color_rgba8 = 0x00ffffff },
+    };
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_pan(engine, 8, 0));
+
+    var stats_before: root.FrameStats = .{};
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_get_stats(engine, &stats_before));
+    try std.testing.expectEqual(@as(u32, 0), stats_before.total_rects);
+
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_render(engine, ctx.texture));
+
+    var stats_after: root.FrameStats = .{};
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_get_stats(engine, &stats_after));
+    try std.testing.expectEqual(@as(u32, 2), stats_after.total_rects);
+    try std.testing.expectEqual(@as(u32, 1), stats_after.visible_rects);
+    try std.testing.expectEqual(@as(u32, 64), stats_after.width_px);
+    try std.testing.expectEqual(@as(u32, 64), stats_after.height_px);
+}
