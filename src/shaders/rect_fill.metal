@@ -1,6 +1,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// Keep this layout in lockstep with src/shared/abi.zig.
 struct CameraUniform {
     float transform[6];
     uint viewport_width_px;
@@ -29,6 +30,7 @@ vertex VertexOut rect_vertex(
     constant CameraUniform& camera [[buffer(0)]],
     constant Rect* rects [[buffer(1)]]
 ) {
+    // Two triangles forming a unit quad, expanded per rectangle instance.
     constexpr float2 quad[6] = {
         float2(0.0, 0.0),
         float2(1.0, 0.0),

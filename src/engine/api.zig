@@ -1,4 +1,7 @@
+//! Core engine state machine and Metal-backed render entrypoints.
+
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const abi = @import("../shared/abi.zig");
 const camera_mod = @import("camera.zig");
 const scene_mod = @import("scene.zig");
@@ -31,7 +34,7 @@ extern fn ite_metal_destroy_renderer(renderer: ?*anyopaque) void;
 pub const Engine = opaque {};
 
 const EngineImpl = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     scene: scene_mod.Scene,
     pending_camera: camera_mod.Camera,
     active_camera: camera_mod.Camera,
@@ -66,7 +69,7 @@ pub fn create(out_engine: *?*Engine, config: *const abi.EngineConfig) abi.Engine
         return .invalid_arg;
     }
 
-    const allocator = std.heap.c_allocator;
+    const allocator: Allocator = std.heap.c_allocator;
     const scene = scene_mod.Scene.init(allocator, config.max_rects, config.max_visible_rects) catch {
         out_engine.* = null;
         return .capacity_exceeded;
@@ -127,7 +130,7 @@ pub fn initWithMetallibPath(
     metallib_path: [*:0]const u8,
 ) abi.EngineStatus {
     const state = fromOpaque(engine_ptr);
-    if (metal_device == null or command_queue == null) {
+    if (metal_device == null or command_queue == null or metallib_path[0] == 0) {
         setError(state, "init requires non-null Metal handles");
         return .invalid_arg;
     }

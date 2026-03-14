@@ -1,11 +1,15 @@
+//! Camera math shared by the CPU and GPU render paths.
+
 const std = @import("std");
 const abi = @import("../shared/abi.zig");
 
+/// 2D point in either canvas or screen space.
 pub const Point = struct {
     x: f32,
     y: f32,
 };
 
+/// Canvas-space bounds visible through the current camera.
 pub const ViewBounds = struct {
     min_x: f32,
     min_y: f32,
@@ -13,6 +17,7 @@ pub const ViewBounds = struct {
     max_y: f32,
 };
 
+/// Mutable camera state stored by the engine.
 pub const Camera = struct {
     pan_x: f32 = 0,
     pan_y: f32 = 0,

@@ -1,16 +1,20 @@
+//! CPU reference renderer used by deterministic tests.
+
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const abi = @import("../shared/abi.zig");
 const color = @import("../shared/color.zig");
 const camera_mod = @import("camera.zig");
 
+/// Rasterizes rectangles into a host-owned RGBA8 pixel buffer.
 pub const ReferenceRenderer = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     pixels: []u32,
     width: usize,
     height: usize,
     background_rgba8: u32 = 0x000000ff,
 
-    pub fn init(allocator: std.mem.Allocator, width: usize, height: usize) !ReferenceRenderer {
+    pub fn init(allocator: Allocator, width: usize, height: usize) !ReferenceRenderer {
         const pixels = try allocator.alloc(u32, width * height);
         return .{
             .allocator = allocator,

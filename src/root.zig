@@ -1,3 +1,5 @@
+//! Public root module for the engine library and C ABI exports.
+
 const std = @import("std");
 
 pub const shared = struct {
@@ -91,5 +93,6 @@ pub export fn ite_engine_get_last_error(engine_ptr: *const Engine) [*:0]const u8
 
 test {
     std.testing.refAllDecls(@This());
+    std.testing.refAllDecls(shared.abi);
     std.testing.refAllDecls(engine.reference_renderer);
 }

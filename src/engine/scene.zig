@@ -1,15 +1,19 @@
+//! Scene storage and visible-set construction for rectangle batches.
+
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const abi = @import("../shared/abi.zig");
 const camera_mod = @import("camera.zig");
 
+/// Stores the full rect list plus the visible subset for the active frame.
 pub const Scene = struct {
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     all_rects: []abi.Rect,
     visible_rects: []abi.Rect,
     count: usize = 0,
     visible_count: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, max_rects: usize, max_visible_rects: usize) !Scene {
+    pub fn init(allocator: Allocator, max_rects: usize, max_visible_rects: usize) !Scene {
         return .{
             .allocator = allocator,
             .all_rects = try allocator.alloc(abi.Rect, max_rects),

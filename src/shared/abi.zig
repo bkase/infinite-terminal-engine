@@ -1,13 +1,18 @@
+//! Shared ABI types used by Zig, C, Swift, and Metal code.
+
 const std = @import("std");
 
+/// Version tag embedded in the public engine header.
 pub const ABI_VERSION: u32 = 1;
 
+/// Camera transform uploaded once per frame.
 pub const CameraUniform = extern struct {
     transform: [6]f32,
     viewport_width_px: u32,
     viewport_height_px: u32,
 };
 
+/// Rectangle instance payload shared with the CPU and GPU renderers.
 pub const Rect = extern struct {
     x: f32,
     y: f32,
@@ -19,6 +24,7 @@ pub const Rect = extern struct {
     _pad2: u32 = 0,
 };
 
+/// Status codes returned through the C ABI.
 pub const EngineStatus = enum(c_int) {
     ok = 0,
     invalid_arg = 1,
@@ -28,6 +34,7 @@ pub const EngineStatus = enum(c_int) {
     capacity_exceeded = 5,
 };
 
+/// Static engine configuration chosen at creation time.
 pub const EngineConfig = extern struct {
     abi_version: u32 = ABI_VERSION,
     max_rects: u32,
@@ -38,6 +45,7 @@ pub const EngineConfig = extern struct {
     max_zoom: f32 = 8.0,
 };
 
+/// Frame diagnostics reported back to the host application.
 pub const FrameStats = extern struct {
     total_rects: u32 = 0,
     visible_rects: u32 = 0,
