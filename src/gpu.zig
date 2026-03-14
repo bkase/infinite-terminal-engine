@@ -71,6 +71,17 @@ fn initEngineWithPath(engine: *root.Engine, device: *anyopaque, queue: *anyopaqu
     );
 }
 
+fn renderAndRead(
+    engine: *root.Engine,
+    texture: *anyopaque,
+    allocator: std.mem.Allocator,
+    width: usize,
+    height: usize,
+) ![]u8 {
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_render(engine, texture));
+    return readPixels(texture, allocator, width, height);
+}
+
 test "I05 invalid_metallib_path_fails_cleanly" {
     const engine = try createEngine(32, 32);
     defer root.ite_engine_destroy(engine);
@@ -120,6 +131,65 @@ test "G02 gpu_overlap_painter_order" {
     try std.testing.expectEqual(@as(u32, 0x0000ffff), colorAt(pixels, 64, 24, 24));
 }
 
+test "G03 gpu_pan_shifts_pixels" {
+    const engine = try createEngine(64, 64);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(64, 64);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    const rects = [_]root.Rect{
+        .{ .x = 12, .y = 12, .w = 12, .h = 12, .color_rgba8 = 0xff00ffff },
+    };
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+
+    const before = try renderAndRead(engine, ctx.texture, std.testing.allocator, 64, 64);
+    defer std.testing.allocator.free(before);
+    try std.testing.expectEqual(@as(u32, 0xff00ffff), colorAt(before, 64, 16, 16));
+
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_pan(engine, 8, 0));
+    const after = try renderAndRead(engine, ctx.texture, std.testing.allocator, 64, 64);
+    defer std.testing.allocator.free(after);
+    try std.testing.expectEqual(@as(u32, 0xff00ffff), colorAt(after, 64, 24, 16));
+}
+
+test "G04 gpu_zoom_scales_rect" {
+    const engine = try createEngine(64, 64);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(64, 64);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    const rects = [_]root.Rect{
+        .{ .x = 8, .y = 8, .w = 8, .h = 8, .color_rgba8 = 0x00ffffff },
+    };
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_zoom(engine, 2, 0, 0));
+
+    const pixels = try renderAndRead(engine, ctx.texture, std.testing.allocator, 64, 64);
+    defer std.testing.allocator.free(pixels);
+    try std.testing.expectEqual(@as(u32, 0x00ffffff), colorAt(pixels, 64, 20, 20));
+}
+
+test "G05 gpu_pan_zoom_combo" {
+    const engine = try createEngine(64, 64);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(64, 64);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    const rects = [_]root.Rect{
+        .{ .x = 10, .y = 10, .w = 10, .h = 10, .color_rgba8 = 0xffffffff },
+    };
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_pan(engine, 6, 4));
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_zoom(engine, 1.5, 0, 0));
+
+    const pixels = try renderAndRead(engine, ctx.texture, std.testing.allocator, 64, 64);
+    defer std.testing.allocator.free(pixels);
+    try std.testing.expectEqual(@as(u32, 0xffffffff), colorAt(pixels, 64, 28, 24));
+}
+
 test "G06 gpu_empty_scene" {
     const engine = try createEngine(32, 32);
     defer root.ite_engine_destroy(engine);
@@ -157,6 +227,62 @@ test "G10 gpu_repeated_render_stability" {
     defer std.testing.allocator.free(second);
 
     try std.testing.expectEqualSlices(u8, first, second);
+}
+
+test "G07 gpu_resize_consistency" {
+    const engine = try createEngine(32, 32);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(48, 48);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    const rects = [_]root.Rect{
+        .{ .x = 4, .y = 4, .w = 8, .h = 8, .color_rgba8 = 0xff0000ff },
+    };
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_resize(engine, 48, 48));
+
+    const pixels = try renderAndRead(engine, ctx.texture, std.testing.allocator, 48, 48);
+    defer std.testing.allocator.free(pixels);
+    try std.testing.expectEqual(@as(u32, 0xff0000ff), colorAt(pixels, 48, 8, 8));
+}
+
+test "G08 gpu_visible_set_boundary" {
+    const engine = try createEngine(32, 32);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(32, 32);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    const rects = [_]root.Rect{
+        .{ .x = 28, .y = 8, .w = 8, .h = 8, .color_rgba8 = 0x00ff00ff },
+    };
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+
+    const pixels = try renderAndRead(engine, ctx.texture, std.testing.allocator, 32, 32);
+    defer std.testing.allocator.free(pixels);
+    try std.testing.expectEqual(@as(u32, 0x00ff00ff), colorAt(pixels, 32, 30, 12));
+}
+
+test "G09 gpu_max_visible_rects_smoke" {
+    const engine = try createEngine(64, 64);
+    defer root.ite_engine_destroy(engine);
+    const ctx = try createGpuContext(64, 64);
+    defer destroyGpuContext(ctx);
+    try initEngineWithPath(engine, ctx.device, ctx.queue);
+
+    var rects: [32]root.Rect = undefined;
+    for (&rects, 0..) |*rect, idx| {
+        const x: f32 = @floatFromInt((idx % 8) * 8);
+        const y: f32 = @floatFromInt((idx / 8) * 8);
+        rect.* = .{ .x = x, .y = y, .w = 6, .h = 6, .color_rgba8 = 0xffffffff };
+    }
+
+    try std.testing.expectEqual(root.EngineStatus.ok, root.ite_engine_replace_rects(engine, &rects, rects.len));
+    const pixels = try renderAndRead(engine, ctx.texture, std.testing.allocator, 64, 64);
+    defer std.testing.allocator.free(pixels);
+    try std.testing.expectEqual(@as(u32, 0xffffffff), colorAt(pixels, 64, 3, 3));
+    try std.testing.expectEqual(@as(u32, 0xffffffff), colorAt(pixels, 64, 27, 27));
 }
 
 test "I08 render_updates_stats_from_active_snapshot" {
