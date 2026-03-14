@@ -1,0 +1,20 @@
+.{
+    .name = .infinite_terminal_engine,
+    .version = "0.0.0",
+    .fingerprint = 0xe7823571f50fb42b,
+    .minimum_zig_version = "0.15.2",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "scripts",
+        "tests",
+        "ctests",
+        "docs",
+        ".githooks",
+        ".github",
+        "README.md",
+        "AGENTS.md",
+    },
+}

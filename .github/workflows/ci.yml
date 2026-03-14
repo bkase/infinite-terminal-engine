@@ -1,0 +1,16 @@
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install repo hooks
+        run: scripts/install-hooks.sh
+      - name: Verify commit gate
+        run: scripts/verify-commit.sh
