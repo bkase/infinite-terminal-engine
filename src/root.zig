@@ -40,6 +40,15 @@ pub export fn ite_engine_init(
     return engine.api.init(engine_ptr, metal_device, command_queue, shader_library);
 }
 
+pub export fn ite_engine_init_with_metallib_path(
+    engine_ptr: *Engine,
+    metal_device: ?*anyopaque,
+    command_queue: ?*anyopaque,
+    metallib_path: [*:0]const u8,
+) EngineStatus {
+    return engine.api.initWithMetallibPath(engine_ptr, metal_device, command_queue, metallib_path);
+}
+
 pub export fn ite_engine_replace_rects(
     engine_ptr: *Engine,
     rects: [*]const Rect,

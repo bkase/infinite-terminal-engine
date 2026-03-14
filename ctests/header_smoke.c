@@ -1,8 +1,8 @@
 #include "engine.h"
 
 int main(void) {
-    struct Engine *engine = 0;
-    struct EngineConfig config = {
+    struct ite_Engine *engine = 0;
+    struct ite_EngineConfig config = {
         .abi_version = ite_engine_header_version(),
         .max_rects = 16,
         .max_visible_rects = 16,
@@ -12,7 +12,7 @@ int main(void) {
         .max_zoom = 8.0f,
     };
 
-    if (ite_engine_create(&engine, &config) != EngineStatus_ok) {
+    if (ite_engine_create(&engine, &config) != ite_EngineStatus_ok) {
         return 1;
     }
     ite_engine_destroy(engine);
