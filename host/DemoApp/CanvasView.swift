@@ -46,8 +46,9 @@ struct CanvasView: NSViewRepresentable {
         }
 
         func draw(in view: MTKView) {
-            guard let texture = view.currentDrawable?.texture else { return }
-            runtime.render(texture: texture)
+            guard let drawable = view.currentDrawable else { return }
+            runtime.render(texture: drawable.texture)
+            runtime.present(drawable: drawable)
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {

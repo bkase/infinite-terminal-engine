@@ -1,6 +1,7 @@
 import Foundation
 import EngineABI
 import Metal
+import QuartzCore
 
 struct CanvasRect {
     var x: Float
@@ -17,6 +18,8 @@ final class EngineRuntime: ObservableObject {
     private let bindings = EngineBindings.shared
     nonisolated(unsafe) private var engine: OpaquePointer?
     private var didInitialize = false
+    private var queue: MTLCommandQueue?
+    private var presentError = [CChar](repeating: 0, count: 256)
 
     init() {
         var handle: OpaquePointer?
@@ -40,6 +43,7 @@ final class EngineRuntime: ObservableObject {
 
     func initializeIfNeeded(device: MTLDevice, queue: MTLCommandQueue) {
         guard !didInitialize, let engine else { return }
+        self.queue = queue
         guard let metallibURL = Bundle.module.url(forResource: "rect_fill", withExtension: "metallib") else { return }
         let status = metallibURL.path.withCString { path in
             bindings.initWithMetallibPath(
@@ -84,6 +88,23 @@ final class EngineRuntime: ObservableObject {
             updateStats()
         } else if let error = bindings.getLastError(engine) {
             statsSummary = String(cString: error)
+        }
+    }
+
+    func present(drawable: CAMetalDrawable) {
+        guard let queue else { return }
+        presentError.withUnsafeMutableBufferPointer { buffer in
+            _ = bindings.presentDrawable(
+                Unmanaged.passUnretained(queue).toOpaque(),
+                Unmanaged.passUnretained(drawable).toOpaque(),
+                buffer.baseAddress,
+                buffer.count
+            )
+        }
+        if presentError[0] != 0 {
+            let end = presentError.firstIndex(of: 0) ?? presentError.endIndex
+            statsSummary = String(decoding: presentError[..<end].map(UInt8.init(bitPattern:)), as: UTF8.self)
+            presentError = [CChar](repeating: 0, count: 256)
         }
     }
 

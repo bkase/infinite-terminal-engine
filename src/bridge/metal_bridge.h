@@ -14,6 +14,7 @@ void ite_metal_release_handle(void *handle);
 void ite_metal_destroy_renderer(void *renderer);
 
 void *ite_metal_create_renderer(void *device, void *command_queue, void *library, char *error_buf, size_t error_buf_len);
+int ite_metal_present_drawable(void *command_queue, void *drawable, char *error_buf, size_t error_buf_len);
 int ite_metal_renderer_draw(
     void *renderer,
     void *texture,

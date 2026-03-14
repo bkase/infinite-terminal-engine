@@ -125,6 +125,26 @@ void *ite_metal_create_renderer(void *device_handle, void *command_queue_handle,
     return renderer;
 }
 
+int ite_metal_present_drawable(void *command_queue_handle, void *drawable_handle, char *error_buf, size_t error_buf_len) {
+    id<MTLCommandQueue> command_queue = (__bridge id<MTLCommandQueue>)command_queue_handle;
+    id<MTLDrawable> drawable = (__bridge id<MTLDrawable>)drawable_handle;
+    if (command_queue == nil || drawable == nil) {
+        ite_write_error(error_buf, error_buf_len, @"missing drawable presentation arguments");
+        return 0;
+    }
+
+    id<MTLCommandBuffer> command_buffer = [command_queue commandBuffer];
+    [command_buffer presentDrawable:drawable];
+    [command_buffer commit];
+    [command_buffer waitUntilCompleted];
+    if (command_buffer.error != nil) {
+        ite_write_error(error_buf, error_buf_len, command_buffer.error.localizedDescription ?: @"drawable present failed");
+        return 0;
+    }
+
+    return 1;
+}
+
 int ite_metal_renderer_draw(
     void *renderer_handle,
     void *texture_handle,
