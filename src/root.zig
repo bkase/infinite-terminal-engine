@@ -2,11 +2,14 @@ const std = @import("std");
 
 pub const shared = struct {
     pub const abi = @import("shared/abi.zig");
+    pub const camera_math = @import("shared/camera_math.zig");
     pub const color = @import("shared/color.zig");
 };
 
 pub const engine = struct {
     pub const api = @import("engine/api.zig");
+    pub const scene = @import("engine/scene.zig");
+    pub const visible_set = @import("engine/visible_set.zig");
 };
 
 pub const CameraUniform = shared.abi.CameraUniform;
@@ -19,8 +22,11 @@ pub const ABI_VERSION = shared.abi.ABI_VERSION;
 
 comptime {
     _ = shared.abi;
+    _ = shared.camera_math;
     _ = shared.color;
     _ = engine.api;
+    _ = engine.scene;
+    _ = engine.visible_set;
 }
 
 test {
