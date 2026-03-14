@@ -5,6 +5,8 @@ zig-cache/
 zig-out/
 DerivedData/
 .swiftpm/
+.beads/.br_history/
+ghostty/
 host/.build/
 host/.swiftpm/
 host/DemoApp/Resources/*.metallib

@@ -10,6 +10,7 @@ Prototype for an Apple Silicon macOS infinite 2D canvas with:
 Verification entrypoints:
 
 - `scripts/install-hooks.sh`
+- `scripts/stage-engine-header.sh`
 - `zig build doctor`
 - `zig build ci`
 - `scripts/verify-demo.sh`
