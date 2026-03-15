@@ -30,6 +30,12 @@ Reconnect accepts an optional `reconnect_after_output_seq` anchor.
 - If the anchor is current, the transport replays only the missing output tail and then emits the latest status.
 - If the anchor is ahead of the session's retained output, the transport falls back to bootstrap and records a `stale_anchor` diagnostic line.
 
+`bd-3rr` layers a client-side `SessionClient` on top of this transport:
+
+- subscribe creates a fresh surface adapter and ingests bootstrap before live bytes
+- reconnect also creates a fresh adapter and intentionally requests a new bootstrap so replay never targets a stale adapter instance
+- per-surface `overlayText` stays local to the affected surface for disconnected or failed session states
+
 ## Diagnostics
 
 Each connection produces deterministic log lines with:
@@ -45,6 +51,7 @@ Each connection produces deterministic log lines with:
 ```bash
 ./scripts/test-session-transport.sh
 ./scripts/check-session-transport.sh
+./scripts/check-session-client.sh
 ```
 
-Coverage includes token success/failure, bootstrap ordering, reconnect replay, stale-anchor fallback, and lease-revocation delivery.
+Coverage includes token success/failure, bootstrap ordering, reconnect replay, stale-anchor fallback, lease-revocation delivery, and client-side bootstrap/live/reconnect/failure overlay handling.

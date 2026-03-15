@@ -9,6 +9,8 @@ struct GhosttySurfaceBootstrap: Sendable {
     let command: String?
     let initialInput: String?
 
+    static let empty = Self(command: nil, initialInput: nil)
+
     static func loginShellBanner(shellPath: String = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh") -> Self {
         Self(
             command: "\(shellPath) -l",
