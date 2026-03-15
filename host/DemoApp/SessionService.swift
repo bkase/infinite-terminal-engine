@@ -72,11 +72,16 @@ struct SessionStatusRecord: Equatable {
 
 struct SessionBootstrap: Equatable {
     let bytes: [UInt8]
-    let outputSeqAnchor: UInt64
+    let outputSeqStart: UInt64
+    let outputSeqEnd: UInt64
     let size: TerminalSessionSize
     let status: RoomSessionStatus
     let exitCode: Int32?
     let failureReason: String?
+
+    var outputSeqAnchor: UInt64 {
+        outputSeqEnd
+    }
 }
 
 enum SessionDelivery: Equatable {
@@ -112,6 +117,76 @@ protocol PTYBackend: AnyObject {
     func writeInput(_ bytes: [UInt8]) throws
     func bootstrap() throws -> [UInt8]
     func stop() throws
+}
+
+enum ReplayLogEntry: Equatable {
+    case start(TerminalSessionSize)
+    case resize(TerminalSessionSize)
+    case output([UInt8])
+    case input([UInt8])
+}
+
+final class ReplayLogPTYBackend: PTYBackend {
+    var eventSink: ((PTYBackendEvent) -> Void)?
+
+    private(set) var currentSize: TerminalSessionSize?
+    private(set) var transcript: [ReplayLogEntry] = []
+    private(set) var isStopped = false
+
+    func start(sessionID: SessionID, initialSize: TerminalSessionSize) throws {
+        currentSize = initialSize
+        transcript.append(.start(initialSize))
+    }
+
+    func resize(to size: TerminalSessionSize) throws {
+        currentSize = size
+        transcript.append(.resize(size))
+    }
+
+    func writeInput(_ bytes: [UInt8]) throws {
+        transcript.append(.input(bytes))
+    }
+
+    func bootstrap() throws -> [UInt8] {
+        transcript.reduce(into: [UInt8]()) { bytes, entry in
+            if case .output(let output) = entry {
+                bytes.append(contentsOf: output)
+            }
+        }
+    }
+
+    func stop() throws {
+        isStopped = true
+    }
+
+    func emitOutput(_ bytes: [UInt8]) {
+        guard !bytes.isEmpty else { return }
+        transcript.append(.output(bytes))
+        eventSink?(.output(bytes))
+    }
+
+    func emitExit(_ code: Int32) {
+        eventSink?(.exited(code))
+    }
+
+    func emitFailure(_ reason: String) {
+        eventSink?(.failed(reason))
+    }
+
+    func transcriptLines() -> [String] {
+        transcript.map { entry in
+            switch entry {
+            case .start(let size):
+                return "start size=\(size.cols)x\(size.rows)"
+            case .resize(let size):
+                return "resize size=\(size.cols)x\(size.rows)"
+            case .output(let bytes):
+                return "output bytes=\(bytes.count) text=\(String(decoding: bytes, as: UTF8.self).debugDescription)"
+            case .input(let bytes):
+                return "input bytes=\(bytes.count) text=\(String(decoding: bytes, as: UTF8.self).debugDescription)"
+            }
+        }
+    }
 }
 
 final class SessionActor {
@@ -215,7 +290,8 @@ final class SessionActor {
 
         let bootstrap = SessionBootstrap(
             bytes: bootstrapBytes,
-            outputSeqAnchor: outputSeq,
+            outputSeqStart: outputHistory.first?.seqStart ?? 0,
+            outputSeqEnd: outputSeq,
             size: size,
             status: status,
             exitCode: exitCode,
@@ -255,6 +331,25 @@ final class SessionActor {
 
     func outputChunks() -> [SessionOutputChunk] {
         outputHistory
+    }
+
+    func outputChunks(after outputSeq: UInt64) -> [SessionOutputChunk] {
+        outputHistory.compactMap { chunk in
+            guard chunk.seqEnd > outputSeq else {
+                return nil
+            }
+            guard chunk.seqStart <= outputSeq else {
+                return chunk
+            }
+
+            let sliceOffset = Int(outputSeq - chunk.seqStart + 1)
+            let slicedBytes = Array(chunk.bytes[sliceOffset...])
+            return SessionOutputChunk(
+                seqStart: outputSeq + 1,
+                seqEnd: chunk.seqEnd,
+                bytes: slicedBytes
+            )
+        }
     }
 
     private static func validate(size: TerminalSessionSize, limits: SessionResourceLimits) throws {

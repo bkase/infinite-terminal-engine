@@ -14,9 +14,9 @@ mkdir -p "$bundle_root/transcripts" "$bundle_root/summaries" "$bundle_root/logs"
 
 cat > "$bundle_root/transcripts/events.jsonl" <<'EOF'
 {"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-provision","ts_ms":0,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"ok","kind":"session_provisioned","session_id":"session-1"}
-{"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-running","ts_ms":1,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"ok","kind":"backend_started","session_id":"session-1"}
-{"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-bootstrap","ts_ms":2,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"ok","kind":"bootstrap_redraw","session_id":"session-1"}
-{"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-output","ts_ms":3,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"ok","kind":"output_chunk","session_id":"session-1"}
+{"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-running","ts_ms":1,"domain":"session","component":"replay-log-backend","scenario_name":"session-service-lifecycle","status":"ok","kind":"backend_started","session_id":"session-1"}
+{"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-bootstrap","ts_ms":2,"domain":"session","component":"replay-log-backend","scenario_name":"session-service-lifecycle","status":"ok","kind":"bootstrap_redraw","session_id":"session-1","output_seq_start":1,"output_seq_end":11}
+{"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-live","ts_ms":3,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"ok","kind":"live_output_continuation","session_id":"session-1","output_seq_start":12,"output_seq_end":13}
 {"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-exit","ts_ms":4,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"ok","kind":"session_exited","session_id":"session-1"}
 {"schema_version":"ite.verification_artifact.v1","event_id":"evt-session-failed","ts_ms":5,"domain":"session","component":"session-actor","scenario_name":"session-service-lifecycle","status":"fault","kind":"session_failed","session_id":"session-2","fault_id":"fault-buffer-overflow"}
 EOF
@@ -27,9 +27,10 @@ EOF
 
 cat > "$bundle_root/logs/session-1.log" <<'EOF'
 session_id=session-1 status=provisioning size=80x24
-session_id=session-1 status=running output_seq=0 subscriber_count=0
-session_id=session-1 bootstrap_anchor=0 subscriber_count=1
-session_id=session-1 status=exited exit_code=0 output_seq=5
+session_id=session-1 status=running output_seq=11 subscriber_count=0
+session_id=session-1 bootstrap_seq_start=1 bootstrap_seq_end=11 live_seq_next=12 subscriber_count=1
+session_id=session-1 live_output seq_start=12 seq_end=13
+session_id=session-1 status=exited exit_code=0 output_seq=13
 EOF
 
 cat > "$bundle_root/logs/session-2.log" <<'EOF'

@@ -44,7 +44,7 @@ final class SessionActorTests: XCTestCase {
     }
 
     func testOutputSequenceRemainsMonotonicAcrossChunks() throws {
-        let backend = TestPTYBackend(bootstrapBytes: Array("screen".utf8))
+        let backend = ReplayLogPTYBackend()
         let actor = try SessionActor(
             sessionID: SessionID(rawValue: "session-1"),
             roomID: RoomID(rawValue: "room-1"),
@@ -54,29 +54,107 @@ final class SessionActorTests: XCTestCase {
         )
         try actor.start()
 
+        backend.emitOutput(Array("screen".utf8))
         let bootstrap = try actor.subscribe(clientID: ClientID(rawValue: "client-1"))
-        XCTAssertEqual(bootstrap.outputSeqAnchor, 0)
+        XCTAssertEqual(bootstrap.outputSeqStart, 1)
+        XCTAssertEqual(bootstrap.outputSeqAnchor, 6)
         XCTAssertEqual(String(decoding: bootstrap.bytes, as: UTF8.self), "screen")
 
-        backend.emit(.output(Array("abc".utf8)))
-        backend.emit(.output(Array("de".utf8)))
+        backend.emitOutput(Array("abc".utf8))
+        backend.emitOutput(Array("de".utf8))
 
         XCTAssertEqual(
             actor.outputChunks(),
             [
-                SessionOutputChunk(seqStart: 1, seqEnd: 3, bytes: Array("abc".utf8)),
-                SessionOutputChunk(seqStart: 4, seqEnd: 5, bytes: Array("de".utf8)),
+                SessionOutputChunk(seqStart: 1, seqEnd: 6, bytes: Array("screen".utf8)),
+                SessionOutputChunk(seqStart: 7, seqEnd: 9, bytes: Array("abc".utf8)),
+                SessionOutputChunk(seqStart: 10, seqEnd: 11, bytes: Array("de".utf8)),
             ]
         )
-        XCTAssertEqual(actor.state().outputSeq, 5)
+        XCTAssertEqual(actor.state().outputSeq, 11)
         XCTAssertEqual(
             actor.deliveries(for: ClientID(rawValue: "client-1")),
             [
                 .bootstrap(bootstrap),
-                .status(SessionStatusRecord(status: .running, outputSeq: 0, exitCode: nil, failureReason: nil)),
-                .output(SessionOutputChunk(seqStart: 1, seqEnd: 3, bytes: Array("abc".utf8))),
-                .output(SessionOutputChunk(seqStart: 4, seqEnd: 5, bytes: Array("de".utf8))),
+                .status(SessionStatusRecord(status: .running, outputSeq: 6, exitCode: nil, failureReason: nil)),
+                .output(SessionOutputChunk(seqStart: 7, seqEnd: 9, bytes: Array("abc".utf8))),
+                .output(SessionOutputChunk(seqStart: 10, seqEnd: 11, bytes: Array("de".utf8))),
             ]
+        )
+    }
+
+    func testLateJoinBootstrapAndLiveContinuationUseReplayLogBackend() throws {
+        let backend = ReplayLogPTYBackend()
+        let actor = try SessionActor(
+            sessionID: SessionID(rawValue: "session-1"),
+            roomID: RoomID(rawValue: "room-1"),
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            initialSize: TerminalSessionSize(cols: 80, rows: 24),
+            backend: backend
+        )
+        try actor.start()
+
+        backend.emitOutput(Array("hello ".utf8))
+        backend.emitOutput(Array("world".utf8))
+
+        let bootstrap = try actor.subscribe(clientID: ClientID(rawValue: "late-joiner"))
+        XCTAssertEqual(String(decoding: bootstrap.bytes, as: UTF8.self), "hello world")
+        XCTAssertEqual(bootstrap.outputSeqStart, 1)
+        XCTAssertEqual(bootstrap.outputSeqAnchor, 11)
+
+        backend.emitOutput(Array("!\n".utf8))
+
+        XCTAssertEqual(
+            actor.outputChunks(after: bootstrap.outputSeqAnchor),
+            [SessionOutputChunk(seqStart: 12, seqEnd: 13, bytes: Array("!\n".utf8))]
+        )
+    }
+
+    func testBootstrapCarriesCurrentSizeAcrossResizeAndLongRunningOutput() throws {
+        let backend = ReplayLogPTYBackend()
+        let actor = try SessionActor(
+            sessionID: SessionID(rawValue: "session-1"),
+            roomID: RoomID(rawValue: "room-1"),
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            initialSize: TerminalSessionSize(cols: 80, rows: 24),
+            backend: backend
+        )
+        try actor.start()
+
+        backend.emitOutput(Array(repeating: UInt8(ascii: "a"), count: 32))
+        try actor.resize(to: TerminalSessionSize(cols: 120, rows: 40))
+        backend.emitOutput(Array("wrapped-line\nnext-line\n".utf8))
+
+        let bootstrap = try actor.subscribe(clientID: ClientID(rawValue: "client-1"))
+        XCTAssertEqual(bootstrap.size, TerminalSessionSize(cols: 120, rows: 40))
+        XCTAssertEqual(bootstrap.outputSeqAnchor, 55)
+        XCTAssertEqual(
+            backend.transcriptLines(),
+            [
+                "start size=80x24",
+                "output bytes=32 text=\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+                "resize size=120x40",
+                #"output bytes=23 text="wrapped-line\nnext-line\n""#,
+            ]
+        )
+    }
+
+    func testOutputChunksAfterAnchorSlicePartiallyConsumedChunk() throws {
+        let backend = ReplayLogPTYBackend()
+        let actor = try SessionActor(
+            sessionID: SessionID(rawValue: "session-1"),
+            roomID: RoomID(rawValue: "room-1"),
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            initialSize: TerminalSessionSize(cols: 80, rows: 24),
+            backend: backend
+        )
+        try actor.start()
+
+        backend.emitOutput(Array("abcdef".utf8))
+
+        XCTAssertEqual(
+            actor.outputChunks(after: 3),
+            [SessionOutputChunk(seqStart: 4, seqEnd: 6, bytes: Array("def".utf8))]
         )
     }
 

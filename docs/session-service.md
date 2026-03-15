@@ -16,6 +16,8 @@
 
 `PTYBackend` is the runtime seam for real PTY implementations, bootstrap-capable multiplexers, and deterministic test doubles.
 
+`ReplayLogPTYBackend` is the first bootstrap-capable prototype adapter. It retains a session-local transcript of ordered output and resize history, emits bootstrap redraw bytes by replaying retained output, and leaves the backend pluggable for a stronger redraw source later.
+
 ## Resource limits
 
 Per-session limits are explicit from day one:
@@ -33,6 +35,8 @@ The actor exposes deterministic deliveries for tests and transport integration:
 - `bootstrap`: redraw bytes plus the live-stream anchor
 - `output`: ordered byte chunks with inclusive sequence ranges
 - `status`: lifecycle transitions with `outputSeq`, `exitCode`, and `failureReason`
+
+For reconnect and late join, `SessionActor.outputChunks(after:)` slices output by arbitrary anchors, including mid-chunk anchors, so continuation does not depend on transport chunk boundaries.
 
 ## Verification
 
