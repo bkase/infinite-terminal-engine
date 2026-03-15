@@ -7,7 +7,8 @@ final class FrameSchedulerTests: XCTestCase {
 
         XCTAssertTrue(scheduler.invalidate(.camera))
         XCTAssertFalse(scheduler.invalidate(.camera))
-        XCTAssertEqual(scheduler.consumePendingDraw(), .camera)
+        XCTAssertEqual(scheduler.pendingDraw(), .camera)
+        XCTAssertEqual(scheduler.completePendingDraw(), .camera)
     }
 
     func testTexturePublishAndTimerCoalesce() {
@@ -15,11 +16,26 @@ final class FrameSchedulerTests: XCTestCase {
 
         XCTAssertTrue(scheduler.invalidate(.texture))
         XCTAssertFalse(scheduler.invalidate(.timer))
-        XCTAssertEqual(scheduler.consumePendingDraw(), [.texture, .timer])
+        XCTAssertEqual(scheduler.pendingDraw(), [.texture, .timer])
+        XCTAssertEqual(scheduler.completePendingDraw(), [.texture, .timer])
     }
 
     func testIdleSchedulerDoesNotDraw() {
         var scheduler = FrameScheduler()
-        XCTAssertNil(scheduler.consumePendingDraw())
+        XCTAssertNil(scheduler.pendingDraw())
+        XCTAssertNil(scheduler.completePendingDraw())
+    }
+
+    func testPendingDrawSurvivesFailedAttemptUntilCompleted() {
+        var scheduler = FrameScheduler()
+
+        XCTAssertTrue(scheduler.invalidate([.texture, .timer]))
+        XCTAssertEqual(scheduler.pendingDraw(), [.texture, .timer])
+        XCTAssertEqual(scheduler.pendingDraw(), [.texture, .timer])
+        XCTAssertTrue(scheduler.scheduled)
+
+        XCTAssertEqual(scheduler.completePendingDraw(), [.texture, .timer])
+        XCTAssertNil(scheduler.pendingDraw())
+        XCTAssertFalse(scheduler.scheduled)
     }
 }

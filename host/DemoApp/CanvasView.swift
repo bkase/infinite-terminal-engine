@@ -67,13 +67,14 @@ struct CanvasView: NSViewRepresentable {
         }
 
         func draw(in view: MTKView) {
-            guard frameScheduler.consumePendingDraw() != nil else { return }
+            guard frameScheduler.pendingDraw() != nil else { return }
             guard let drawable = view.currentDrawable else { return }
             runtime.setSharedTerminalTexture(
                 textureSource.latestFrontTexture(),
                 generation: textureSource.latestTextureGeneration()
             )
             runtime.render(drawable: drawable)
+            _ = frameScheduler.completePendingDraw()
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {

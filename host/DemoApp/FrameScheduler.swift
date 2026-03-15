@@ -22,7 +22,12 @@ struct FrameScheduler {
         return shouldSchedule
     }
 
-    mutating func consumePendingDraw() -> FrameInvalidationReasons? {
+    func pendingDraw() -> FrameInvalidationReasons? {
+        guard scheduled, !pendingReasons.isEmpty else { return nil }
+        return pendingReasons
+    }
+
+    mutating func completePendingDraw() -> FrameInvalidationReasons? {
         guard scheduled, !pendingReasons.isEmpty else { return nil }
         let reasons = pendingReasons
         pendingReasons = []
