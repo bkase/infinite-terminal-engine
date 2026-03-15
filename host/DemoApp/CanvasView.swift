@@ -44,6 +44,7 @@ struct CanvasView: NSViewRepresentable {
             if let queue {
                 runtime.initializeIfNeeded(device: device, queue: queue)
             }
+            runtime.setBackingScale(view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
             runtime.resize(width: Int(view.drawableSize.width), height: Int(view.drawableSize.height))
         }
 
@@ -57,6 +58,7 @@ struct CanvasView: NSViewRepresentable {
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            runtime.setBackingScale(view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2)
             runtime.resize(width: Int(size.width), height: Int(size.height))
         }
 

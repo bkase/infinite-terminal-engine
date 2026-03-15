@@ -112,6 +112,6 @@ fragment float4 textured_quad_fragment(
     TexturedVertexOut in [[stage_in]],
     texture2d<float> terminal_texture [[texture(0)]]
 ) {
-    constexpr sampler texture_sampler(mag_filter::nearest, min_filter::nearest);
+    constexpr sampler texture_sampler(mag_filter::nearest, min_filter::linear);
     return terminal_texture.sample(texture_sampler, in.uv);
 }

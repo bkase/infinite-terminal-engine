@@ -26,11 +26,7 @@ struct RenderProfile: Decodable, Identifiable {
     }
 
     func surfacePixelSize(cols: Int, rows: Int, backingScale: CGFloat) -> CGSize {
-        let logicalSize = surfaceLogicalSize(cols: cols, rows: rows)
-        return CGSize(
-            width: ceil(logicalSize.width * backingScale),
-            height: ceil(logicalSize.height * backingScale)
-        )
+        TextureBudgetPolicy.pixelSize(cols: cols, rows: rows, profile: self, backingScale: backingScale)
     }
 
     func validate(in bundle: Bundle) throws {

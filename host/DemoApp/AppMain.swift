@@ -30,6 +30,14 @@ struct HostShellView: View {
                         .font(.headline)
                     Text(runtime.statsSummary)
                         .font(.system(.caption, design: .monospaced))
+                    Text("texture memory \(runtime.textureBudgetSummary)")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                    if let warning = runtime.textureBudgetWarning {
+                        Text(warning)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.orange)
+                    }
                     Text("Render shell: DemoApp")
                         .font(.system(.caption2, design: .monospaced))
                         .foregroundStyle(.secondary)

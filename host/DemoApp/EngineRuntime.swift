@@ -14,6 +14,8 @@ struct CanvasRect {
 final class EngineRuntime: ObservableObject {
     @Published var statsSummary = "0 / 0"
     @Published var bootError: String?
+    @Published var textureBudgetSummary = "0.0 MB"
+    @Published var textureBudgetWarning: String?
 
     let renderProfileID: String
     private(set) var surfaces = SurfaceStore()
@@ -22,6 +24,7 @@ final class EngineRuntime: ObservableObject {
     private var compositor: TerminalTextureCompositor?
     private var sharedTexture: MTLTexture?
     private var sharedTextureGeneration: UInt64 = 0
+    private var backingScale: CGFloat = 2
 
     init() {
         let renderProfile: RenderProfile
@@ -37,6 +40,7 @@ final class EngineRuntime: ObservableObject {
         profilesByID = [renderProfile.id: renderProfile]
         camera.resize(width: 1280, height: 720)
         surfaces.replaceAll(with: Self.demoSurfaces(profileID: renderProfile.id))
+        updateTextureBudget()
     }
 
     func initializeIfNeeded(device: MTLDevice, queue: MTLCommandQueue) {
@@ -52,12 +56,18 @@ final class EngineRuntime: ObservableObject {
 
     func replaceSurfaces(_ surfaces: [TerminalSurface]) {
         self.surfaces.replaceAll(with: surfaces)
+        updateTextureBudget()
     }
 
     func setSharedTerminalTexture(_ texture: MTLTexture?, generation: UInt64) {
         guard generation >= sharedTextureGeneration else { return }
         sharedTexture = texture
         sharedTextureGeneration = generation
+    }
+
+    func setBackingScale(_ scale: CGFloat) {
+        backingScale = max(scale, 1)
+        updateTextureBudget()
     }
 
     func resize(width: Int, height: Int) {
@@ -80,6 +90,7 @@ final class EngineRuntime: ObservableObject {
         guard let compositor else { return }
         let frame = buildFrame()
         if compositor.render(drawable: drawable, camera: camera, quads: frame.quads, overlays: frame.overlays) {
+            updateTextureBudget()
             updateStats(visibleSurfaceCount: frame.quads.count)
         } else {
             statsSummary = "texture compositor render failed"
@@ -143,6 +154,22 @@ final class EngineRuntime: ObservableObject {
             ]
         }
         return (quads, overlays.flatMap { $0 })
+    }
+
+    private func updateTextureBudget() {
+        let report = TextureBudgetPolicy.assessRoom(
+            surfaces: surfaces,
+            profilesByID: profilesByID,
+            backingScale: backingScale
+        )
+        textureBudgetSummary = TextureBudgetPolicy.megabytesString(for: report.totalBytes)
+        if report.exceedsRoomBudget {
+            textureBudgetWarning = "room budget exceeded at \(textureBudgetSummary)"
+        } else if let oversizedSurfaceID = report.oversizedSurfaceIDs.first {
+            textureBudgetWarning = "surface \(oversizedSurfaceID.rawValue) exceeds per-surface budget"
+        } else {
+            textureBudgetWarning = nil
+        }
     }
 
     static func demoSurfaces(profileID: String) -> [TerminalSurface] {
