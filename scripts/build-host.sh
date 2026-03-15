@@ -7,5 +7,5 @@ ensure_repo_root
 [ -f Package.swift ] || fail "missing Package.swift"
 scripts/stage-engine-header.sh
 Scripts/swiftpm-cache.sh test
-Scripts/swiftpm-cache.sh build
 scripts/test-ghostty-surface-adapter.sh
+scripts/test-verification-artifacts.sh
