@@ -15,11 +15,12 @@ matches="$(
   rg -n --no-heading '(#include[[:space:]]*[<"]ghostty/|[^[:alnum:]_])ghostty_[[:alnum:]_]+' include src host tests ctests \
     --glob '!include/ite_ghostty_wrapper.h' \
     --glob '!src/vendor/ghostty_wrapper.c' \
+    --glob '!host/DemoApp/GhosttySurfaceAdapter.swift' \
     --glob '!ctests/ghostty_wrapper_smoke.c' || true
 )"
 if [ -n "$matches" ]; then
   printf '%s\n' "$matches" >&2
-  fail "Ghostty API usage must stay inside include/ite_ghostty_wrapper.h and src/vendor/ghostty_wrapper.c"
+  fail "Ghostty API usage must stay inside include/ite_ghostty_wrapper.h, src/vendor/ghostty_wrapper.c, or the sanctioned host adapter"
 fi
 
 mkdir -p zig-out

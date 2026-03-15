@@ -8,3 +8,4 @@ ensure_repo_root
 scripts/stage-engine-header.sh
 Scripts/swiftpm-cache.sh test
 Scripts/swiftpm-cache.sh build
+scripts/test-ghostty-surface-adapter.sh

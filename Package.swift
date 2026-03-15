@@ -9,14 +9,19 @@ let package = Package(
     products: [
         .executable(name: "DemoApp", targets: ["DemoApp"]),
     ],
+    dependencies: [],
     targets: [
+        .binaryTarget(
+            name: "GhosttyKit",
+            path: "ghostty/macos/GhosttyKit.xcframework"
+        ),
         .systemLibrary(
             name: "EngineABI",
             path: "host/EngineABI"
         ),
         .executableTarget(
             name: "DemoApp",
-            dependencies: ["EngineABI"],
+            dependencies: ["EngineABI", "GhosttyKit"],
             path: "host/DemoApp",
             resources: [
                 .copy("Resources"),
@@ -25,6 +30,9 @@ let package = Package(
                 .linkedFramework("Metal"),
                 .linkedFramework("MetalKit"),
                 .linkedFramework("AppKit"),
+                .linkedFramework("IOSurface"),
+                .linkedFramework("Carbon"),
+                .linkedLibrary("c++"),
             ]
         ),
         .testTarget(
