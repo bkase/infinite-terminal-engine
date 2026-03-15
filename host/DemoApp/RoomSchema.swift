@@ -150,6 +150,7 @@ struct DurableRoomSnapshot: Codable, Equatable {
     let roomSeq: UInt64
     let renderProfileIDs: [String]
     let surfaces: [DurableRoomSurface]
+    let controlLeases: [ControlLeaseRecord]
 
     func validate() throws {
         guard !roomID.rawValue.isEmpty else {
@@ -166,6 +167,9 @@ struct DurableRoomSnapshot: Codable, Equatable {
             if !stackRanks.insert(surface.stackRank).inserted {
                 throw RoomSchemaValidationError.duplicateStackRank(surface.stackRank)
             }
+        }
+        for lease in controlLeases {
+            try lease.validate()
         }
     }
 }

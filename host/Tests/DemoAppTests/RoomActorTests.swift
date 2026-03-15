@@ -204,6 +204,92 @@ final class RoomActorTests: XCTestCase {
         XCTAssertEqual(recovered.snapshot, actor.snapshot)
     }
 
+    func testRecoveryRestoresLeaseStateFromSnapshotBoundary() throws {
+        let journal = InMemoryRoomJournalStore()
+        let snapshots = InMemoryRoomSnapshotStore()
+        let actor = RoomActor(
+            snapshot: emptySnapshot(),
+            journalStore: journal,
+            snapshotStore: snapshots,
+            snapshotInterval: 3
+        )
+
+        _ = try actor.apply(record(opID: "op-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+        _ = try actor.apply(record(opID: "op-2", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))))
+        _ = try actor.apply(record(opID: "op-3", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-1")
+        ))))
+
+        let recovered = try RoomActor.recover(
+            roomID: RoomID(rawValue: "room-1"),
+            journalStore: journal,
+            snapshotStore: snapshots,
+            snapshotInterval: 3
+        )
+
+        XCTAssertEqual(recovered.snapshot.controlLeases, actor.snapshot.controlLeases)
+        XCTAssertEqual(
+            recovered.controlLease(for: SessionID(rawValue: "session-1")),
+            actor.controlLease(for: SessionID(rawValue: "session-1"))
+        )
+    }
+
+    func testLeaseEpochRemainsMonotonicAcrossSnapshotRecovery() throws {
+        let journal = InMemoryRoomJournalStore()
+        let snapshots = InMemoryRoomSnapshotStore()
+        let actor = RoomActor(
+            snapshot: emptySnapshot(),
+            journalStore: journal,
+            snapshotStore: snapshots,
+            snapshotInterval: 2
+        )
+
+        _ = try actor.apply(record(opID: "op-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+        _ = try actor.apply(record(opID: "op-2", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-1")
+        ))))
+
+        let recovered = try RoomActor.recover(
+            roomID: RoomID(rawValue: "room-1"),
+            journalStore: journal,
+            snapshotStore: snapshots,
+            snapshotInterval: 2
+        )
+
+        XCTAssertEqual(recovered.controlLease(for: SessionID(rawValue: "session-1"))?.leaseEpoch, 1)
+
+        _ = try recovered.apply(record(opID: "op-3", payload: .releaseControl(ReleaseControlOp(
+            sessionID: SessionID(rawValue: "session-1")
+        ))))
+        _ = try recovered.apply(record(opID: "op-4", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-2")
+        ))))
+
+        XCTAssertEqual(recovered.controlLease(for: SessionID(rawValue: "session-1"))?.leaseEpoch, 2)
+    }
+
     func testRecoveryReplaysJournalTailAfterSnapshot() throws {
         let journal = InMemoryRoomJournalStore()
         let snapshots = InMemoryRoomSnapshotStore()
@@ -287,7 +373,8 @@ final class RoomActorTests: XCTestCase {
             roomID: RoomID(rawValue: "room-1"),
             roomSeq: 0,
             renderProfileIDs: ["profile"],
-            surfaces: []
+            surfaces: [],
+            controlLeases: []
         )
     }
 

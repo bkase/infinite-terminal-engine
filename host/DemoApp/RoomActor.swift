@@ -90,6 +90,7 @@ final class RoomActor {
     private let snapshotStore: RoomSnapshotStore
     private let snapshotInterval: UInt64
     private var leaseBySessionID: [SessionID: ControlLeaseRecord] = [:]
+    private var lastLeaseEpochBySessionID: [SessionID: UInt64] = [:]
 
     init(
         snapshot: DurableRoomSnapshot,
@@ -101,6 +102,12 @@ final class RoomActor {
         self.journalStore = journalStore
         self.snapshotStore = snapshotStore
         self.snapshotInterval = max(snapshotInterval, 1)
+        self.leaseBySessionID = Dictionary(
+            uniqueKeysWithValues: snapshot.controlLeases.map { ($0.sessionID, $0) }
+        )
+        self.lastLeaseEpochBySessionID = Dictionary(
+            uniqueKeysWithValues: snapshot.controlLeases.map { ($0.sessionID, $0.leaseEpoch) }
+        )
     }
 
     static func recover(
@@ -115,7 +122,8 @@ final class RoomActor {
                 roomID: roomID,
                 roomSeq: 0,
                 renderProfileIDs: [],
-                surfaces: []
+                surfaces: [],
+                controlLeases: []
             )
         let actor = RoomActor(
             snapshot: baseSnapshot,
@@ -128,6 +136,7 @@ final class RoomActor {
             let applied = try actor.applyRecord(record, to: actor.snapshot)
             actor.snapshot = applied.snapshot
             actor.applySideEffects(applied.sideEffects, submittedAtMillis: record.submittedAtMillis)
+            try actor.refreshSnapshotControlLeases()
         }
         return actor
     }
@@ -156,6 +165,7 @@ final class RoomActor {
         try journalStore.append(sequenced)
         snapshot = applied.snapshot
         applySideEffects(applied.sideEffects, submittedAtMillis: sequenced.submittedAtMillis)
+        try refreshSnapshotControlLeases()
 
         if snapshot.roomSeq.isMultiple(of: snapshotInterval) {
             try snapshotStore.write(
@@ -185,7 +195,8 @@ final class RoomActor {
             roomID: snapshot.roomID,
             roomSeq: record.roomSeq ?? snapshot.roomSeq,
             renderProfileIDs: nextSnapshot.snapshot.renderProfileIDs,
-            surfaces: nextSnapshot.snapshot.surfaces
+            surfaces: nextSnapshot.snapshot.surfaces,
+            controlLeases: nextSnapshot.snapshot.controlLeases
         )
         try sequencedSnapshot.validate()
         return AppliedRoomOp(
@@ -200,10 +211,12 @@ final class RoomActor {
         for leaseEffect in sideEffects {
             switch leaseEffect {
             case .controlAcquired(let sessionID, let holderUserID):
+                let nextEpoch = (lastLeaseEpochBySessionID[sessionID] ?? 0) + 1
+                lastLeaseEpochBySessionID[sessionID] = nextEpoch
                 leaseBySessionID[sessionID] = ControlLeaseRecord(
                     sessionID: sessionID,
                     holderUserID: holderUserID,
-                    leaseEpoch: (leaseBySessionID[sessionID]?.leaseEpoch ?? 0) + 1,
+                    leaseEpoch: nextEpoch,
                     acquiredAtMillis: submittedAtMillis,
                     expiresAtMillis: submittedAtMillis + 30_000
                 )
@@ -305,7 +318,8 @@ final class RoomActor {
             roomID: snapshot.roomID,
             roomSeq: snapshot.roomSeq,
             renderProfileIDs: snapshot.renderProfileIDs,
-            surfaces: surfaces
+            surfaces: surfaces,
+            controlLeases: snapshot.controlLeases
         )
         try next.validate()
         return (snapshot: next, sideEffects: sideEffects)
@@ -319,5 +333,23 @@ final class RoomActor {
             hasher.combine(byte)
         }
         return String(hasher.finalize(), radix: 16)
+    }
+
+    func controlLease(for sessionID: SessionID) -> ControlLeaseRecord? {
+        leaseBySessionID[sessionID]
+    }
+
+    private func refreshSnapshotControlLeases() throws {
+        snapshot = DurableRoomSnapshot(
+            schemaVersion: snapshot.schemaVersion,
+            roomID: snapshot.roomID,
+            roomSeq: snapshot.roomSeq,
+            renderProfileIDs: snapshot.renderProfileIDs,
+            surfaces: snapshot.surfaces,
+            controlLeases: leaseBySessionID.values.sorted { lhs, rhs in
+                lhs.sessionID.rawValue < rhs.sessionID.rawValue
+            }
+        )
+        try snapshot.validate()
     }
 }

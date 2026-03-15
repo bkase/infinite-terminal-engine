@@ -70,7 +70,8 @@ final class RoomSchemaTests: XCTestCase {
             roomID: RoomID(rawValue: "room-empty"),
             roomSeq: 0,
             renderProfileIDs: ["collab-pragmata-v1"],
-            surfaces: []
+            surfaces: [],
+            controlLeases: []
         )
         let populated = DurableRoomSnapshot(
             schemaVersion: .v1,
@@ -91,6 +92,15 @@ final class RoomSchemaTests: XCTestCase {
                     state: .attached,
                     createdBy: UserID(rawValue: "user-1"),
                     createdAtMillis: 1_234
+                )
+            ],
+            controlLeases: [
+                ControlLeaseRecord(
+                    sessionID: SessionID(rawValue: "session-1"),
+                    holderUserID: UserID(rawValue: "user-1"),
+                    leaseEpoch: 3,
+                    acquiredAtMillis: 1_200,
+                    expiresAtMillis: 1_240
                 )
             ]
         )
@@ -140,7 +150,8 @@ final class RoomSchemaTests: XCTestCase {
                     createdBy: UserID(rawValue: "user-2"),
                     createdAtMillis: 2
                 ),
-            ]
+            ],
+            controlLeases: []
         )
         let missingSession = DurableRoomSurface(
             id: TerminalSurfaceID(rawValue: "surface-3"),
@@ -169,12 +180,20 @@ final class RoomSchemaTests: XCTestCase {
     }
 
     func testPersistenceRecordsRoundTripAndValidate() throws {
+        let leaseRecord = ControlLeaseRecord(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-1"),
+            leaseEpoch: 3,
+            acquiredAtMillis: 100,
+            expiresAtMillis: 140
+        )
         let snapshot = DurableRoomSnapshot(
             schemaVersion: .v1,
             roomID: RoomID(rawValue: "room-1"),
             roomSeq: 10,
             renderProfileIDs: ["profile"],
-            surfaces: []
+            surfaces: [],
+            controlLeases: [leaseRecord]
         )
         let snapshotRecord = RoomSnapshotRecord(
             roomID: RoomID(rawValue: "room-1"),
@@ -193,13 +212,6 @@ final class RoomSchemaTests: XCTestCase {
             bootstrapPolicy: .redraw,
             status: .running,
             updatedAtMillis: 100
-        )
-        let leaseRecord = ControlLeaseRecord(
-            sessionID: SessionID(rawValue: "session-1"),
-            holderUserID: UserID(rawValue: "user-1"),
-            leaseEpoch: 3,
-            acquiredAtMillis: 100,
-            expiresAtMillis: 140
         )
 
         let encoder = JSONEncoder()
