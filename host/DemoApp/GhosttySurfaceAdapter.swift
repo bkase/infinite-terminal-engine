@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import GhosttyKit
 import IOSurface
@@ -43,6 +44,9 @@ private func ghosttyReadClipboardCallback(
     _ location: ghostty_clipboard_e,
     _ state: UnsafeMutableRawPointer?
 ) -> Bool {
+    _ = userdata
+    _ = location
+    _ = state
     return false
 }
 
@@ -52,6 +56,10 @@ private func ghosttyConfirmReadClipboardCallback(
     _ state: UnsafeMutableRawPointer?,
     _ request: ghostty_clipboard_request_e
 ) {
+    _ = userdata
+    _ = text
+    _ = state
+    _ = request
 }
 
 private func ghosttyWriteClipboardCallback(
@@ -61,6 +69,11 @@ private func ghosttyWriteClipboardCallback(
     _ len: Int,
     _ confirm: Bool
 ) {
+    _ = userdata
+    _ = location
+    _ = content
+    _ = len
+    _ = confirm
 }
 
 private func ghosttyCloseSurfaceCallback(_ userdata: UnsafeMutableRawPointer?, _ processAlive: Bool) {
@@ -81,7 +94,7 @@ final class GhosttySurfaceAdapter: ObservableObject {
 
     private var config: ghostty_config_t?
     private var app: ghostty_app_t?
-    private var surface: ghostty_surface_t?
+    fileprivate var surface: ghostty_surface_t?
     private weak var hostView: NSView?
     private var lastPixelSize: CGSize = .zero
     private let textureDevice = MTLCreateSystemDefaultDevice()
@@ -143,6 +156,93 @@ final class GhosttySurfaceAdapter: ObservableObject {
         text.withCString { ptr in
             ghostty_surface_text(surface, ptr, UInt(text.lengthOfBytes(using: .utf8)))
         }
+    }
+
+    func routeKeyInput(_ input: GhosttyKeyInput) -> TerminalInputRoute {
+        guard input.action != GhosttyKeyActionCode.release else {
+            if let surface {
+                withSurfaceKeyEvent(input) { ghostty_surface_key(surface, $0) }
+            }
+            return .terminalInteraction
+        }
+
+        guard let bytes = Self.encodeKeyBytes(input) else {
+            if let surface {
+                withSurfaceKeyEvent(input) { ghostty_surface_key(surface, $0) }
+                return .terminalInteraction
+            }
+            return .ignored
+        }
+
+        if let surface {
+            withSurfaceKeyEvent(input) { ghostty_surface_key(surface, $0) }
+        }
+        return .terminalBytes(bytes)
+    }
+
+    func routeTextInput(_ text: String) -> TerminalInputRoute {
+        guard !text.isEmpty else { return .ignored }
+        let payload = Data(text.utf8)
+        if let surface {
+            text.withCString { ptr in
+                ghostty_surface_text(surface, ptr, UInt(text.lengthOfBytes(using: .utf8)))
+            }
+        }
+        return .terminalBytes(payload)
+    }
+
+    func routePaste(_ text: String, bracketed: Bool) -> TerminalInputRoute {
+        guard !text.isEmpty else { return .ignored }
+        let payload = InputNormalizer.encodedPasteBytes(for: text, bracketed: bracketed)
+        if let surface {
+            text.withCString { ptr in
+                ghostty_surface_text(surface, ptr, UInt(text.lengthOfBytes(using: .utf8)))
+            }
+        }
+        return .terminalBytes(payload)
+    }
+
+    func routeMouseButton(_ input: GhosttyMouseButtonInput) -> TerminalInputRoute {
+        guard let surface else { return .terminalInteraction }
+        ghostty_surface_mouse_pos(surface, input.location.x, input.location.y, ghostty_input_mods_e(rawValue: UInt32(input.mods)))
+        _ = ghostty_surface_mouse_button(
+            surface,
+            ghostty_input_mouse_state_e(rawValue: UInt32(input.state)),
+            ghostty_input_mouse_button_e(rawValue: UInt32(input.button)),
+            ghostty_input_mods_e(rawValue: UInt32(input.mods))
+        )
+        return .terminalInteraction
+    }
+
+    func routeMouseMove(location: CGPoint, mods: UInt16) -> TerminalInputRoute {
+        guard let surface else { return .terminalInteraction }
+        ghostty_surface_mouse_pos(surface, location.x, location.y, ghostty_input_mods_e(rawValue: UInt32(mods)))
+        return .terminalInteraction
+    }
+
+    func routeScroll(_ input: GhosttyScrollInput) -> TerminalInputRoute {
+        guard let surface else { return .terminalInteraction }
+        ghostty_surface_mouse_scroll(surface, input.deltaX, input.deltaY, input.scrollMods)
+        return .terminalInteraction
+    }
+
+    func selectionState() -> String? {
+        guard let surface, ghostty_surface_has_selection(surface) else { return nil }
+        var text = ghostty_text_s()
+        guard ghostty_surface_read_selection(surface, &text) else { return nil }
+        defer { ghostty_surface_free_text(surface, &text) }
+        return String(cString: text.text)
+    }
+
+    func copySelectionToClipboard() {
+        guard let selection = selectionState() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(selection, forType: .string)
+    }
+
+    func pasteRequest() -> TerminalInputRoute {
+        guard let text = readClipboardString(location: GHOSTTY_CLIPBOARD_STANDARD) else { return .ignored }
+        return routePaste(text, bracketed: true)
     }
 
     func resize(to pixelSize: CGSize, backingScale: Double) {
@@ -232,6 +332,11 @@ final class GhosttySurfaceAdapter: ObservableObject {
         status = "closed"
     }
 
+    func focusChanged(_ isFocused: Bool) {
+        guard let surface else { return }
+        ghostty_surface_set_focus(surface, isFocused)
+    }
+
     private func createSurface(in view: NSView) throws {
         guard let config else { throw GhosttyAdapterError.configUnavailable }
 
@@ -283,6 +388,74 @@ final class GhosttySurfaceAdapter: ObservableObject {
         let height = UInt32(max(Int(pixelSize.height), 1))
         ghostty_surface_set_content_scale(surface, backingScale, backingScale)
         ghostty_surface_set_size(surface, width, height)
+    }
+
+    private func readClipboardString(location: ghostty_clipboard_e) -> String? {
+        let pasteboard = location == GHOSTTY_CLIPBOARD_SELECTION ? NSPasteboard.general : NSPasteboard.general
+        return pasteboard.string(forType: .string)
+    }
+
+    private func withSurfaceKeyEvent(_ input: GhosttyKeyInput, _ body: (ghostty_input_key_s) -> Void) {
+        input.text.withCString { textPtr in
+            body(ghostty_input_key_s(
+                action: ghostty_input_action_e(rawValue: UInt32(input.action)),
+                mods: ghostty_input_mods_e(rawValue: UInt32(input.mods)),
+                consumed_mods: ghostty_input_mods_e(rawValue: UInt32(input.consumedMods)),
+                keycode: UInt32(input.keyCode),
+                text: textPtr,
+                unshifted_codepoint: input.unshiftedCodepoint,
+                composing: input.composing
+            ))
+        }
+    }
+
+    static func encodeKeyBytes(_ input: GhosttyKeyInput) -> Data? {
+        let mods = input.mods
+        let hasSuper = (mods & UInt16(GHOSTTY_MODS_SUPER.rawValue)) != 0
+        let hasControl = (mods & UInt16(GHOSTTY_MODS_CTRL.rawValue)) != 0
+
+        if hasSuper {
+            return nil
+        }
+
+        if hasControl, let scalar = input.text.unicodeScalars.first, scalar.isASCII {
+            return Data([UInt8(scalar.value & 0x1f)])
+        }
+
+        if !input.text.isEmpty, mods == 0 || mods == UInt16(GHOSTTY_MODS_SHIFT.rawValue) {
+            return Data(input.text.utf8)
+        }
+
+        switch UInt32(input.keyCode) {
+        case GHOSTTY_KEY_ENTER.rawValue:
+            return Data("\r".utf8)
+        case GHOSTTY_KEY_TAB.rawValue:
+            return Data("\t".utf8)
+        case GHOSTTY_KEY_ESCAPE.rawValue:
+            return Data([0x1b])
+        case GHOSTTY_KEY_BACKSPACE.rawValue:
+            return Data([0x7f])
+        case GHOSTTY_KEY_DELETE.rawValue:
+            return Data("\u{1b}[3~".utf8)
+        case GHOSTTY_KEY_HOME.rawValue:
+            return Data("\u{1b}[H".utf8)
+        case GHOSTTY_KEY_END.rawValue:
+            return Data("\u{1b}[F".utf8)
+        case GHOSTTY_KEY_PAGE_UP.rawValue:
+            return Data("\u{1b}[5~".utf8)
+        case GHOSTTY_KEY_PAGE_DOWN.rawValue:
+            return Data("\u{1b}[6~".utf8)
+        case GHOSTTY_KEY_ARROW_UP.rawValue:
+            return Data("\u{1b}[A".utf8)
+        case GHOSTTY_KEY_ARROW_DOWN.rawValue:
+            return Data("\u{1b}[B".utf8)
+        case GHOSTTY_KEY_ARROW_RIGHT.rawValue:
+            return Data("\u{1b}[C".utf8)
+        case GHOSTTY_KEY_ARROW_LEFT.rawValue:
+            return Data("\u{1b}[D".utf8)
+        default:
+            return nil
+        }
     }
 
     private static func duplicatedCString(_ string: String) -> UnsafePointer<CChar>? {
