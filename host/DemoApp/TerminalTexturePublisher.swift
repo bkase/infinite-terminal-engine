@@ -46,6 +46,7 @@ struct TerminalTexturePublishState<Texture> {
 final class TerminalTexturePublisher {
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
+    var didPublishGeneration: ((UInt64) -> Void)?
     private(set) var state = TerminalTexturePublishState<MTLTexture>()
 
     init?(device: MTLDevice?) {
@@ -92,7 +93,9 @@ final class TerminalTexturePublisher {
             Task { @MainActor in
                 guard let self else { return }
                 if completed {
-                    _ = self.state.completePublish(generation)
+                    if self.state.completePublish(generation) {
+                        self.didPublishGeneration?(generation)
+                    }
                 } else {
                     self.state.cancelPublish(generation)
                 }

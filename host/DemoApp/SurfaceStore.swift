@@ -76,6 +76,12 @@ struct SurfaceStore {
         orderedSurfaceIDs().compactMap(surface(id:))
     }
 
+    func focusedSurfaceID() -> TerminalSurfaceID? {
+        orderedSurfaceIDs().reversed().first { id in
+            surface(id: id)?.flags.contains(.focused) == true
+        }
+    }
+
     mutating func upsert(_ surface: TerminalSurface) {
         if let index = indexByID[surface.id] {
             sessionIDs[index] = surface.sessionID
@@ -127,6 +133,23 @@ struct SurfaceStore {
         for surface in surfaces {
             upsert(surface)
         }
+    }
+
+    mutating func updateSurface(
+        id: TerminalSurfaceID,
+        _ update: (inout TerminalSurface) -> Void
+    ) -> Bool {
+        guard let index = indexByID[id] else { return false }
+        var value = surface(at: index)
+        update(&value)
+        sessionIDs[index] = value.sessionID
+        origins[index] = value.origin
+        cols[index] = value.cols
+        rows[index] = value.rows
+        profileIDs[index] = value.profileID
+        stackRanks[index] = value.stackRank
+        flags[index] = value.flags
+        return true
     }
 
     mutating func reserveCapacity(_ minimumCapacity: Int) {

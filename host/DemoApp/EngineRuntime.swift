@@ -18,13 +18,14 @@ final class EngineRuntime: ObservableObject {
     @Published var textureBudgetWarning: String?
 
     let renderProfileID: String
+    var onFrameInvalidation: ((FrameInvalidationReasons) -> Void)?
     private(set) var surfaces = SurfaceStore()
-    private var profilesByID: [String: RenderProfile] = [:]
-    private var camera = CanvasCamera()
+    private(set) var profilesByID: [String: RenderProfile] = [:]
+    private(set) var camera = CanvasCamera()
     private var compositor: TerminalTextureCompositor?
     private var sharedTexture: MTLTexture?
     private var sharedTextureGeneration: UInt64 = 0
-    private var backingScale: CGFloat = 2
+    private(set) var backingScale: CGFloat = 2
 
     init() {
         let renderProfile: RenderProfile
@@ -57,29 +58,67 @@ final class EngineRuntime: ObservableObject {
     func replaceSurfaces(_ surfaces: [TerminalSurface]) {
         self.surfaces.replaceAll(with: surfaces)
         updateTextureBudget()
+        invalidateFrame(.surfaces)
     }
 
     func setSharedTerminalTexture(_ texture: MTLTexture?, generation: UInt64) {
         guard generation >= sharedTextureGeneration else { return }
+        let didChange = generation > sharedTextureGeneration || sharedTexture !== texture
         sharedTexture = texture
         sharedTextureGeneration = generation
+        if didChange {
+            invalidateFrame(.texture)
+        }
     }
 
     func setBackingScale(_ scale: CGFloat) {
         backingScale = max(scale, 1)
         updateTextureBudget()
+        invalidateFrame(.surfaces)
     }
 
     func resize(width: Int, height: Int) {
         camera.resize(width: width, height: height)
+        invalidateFrame(.camera)
     }
 
     func pan(delta: CGSize) {
         camera.pan(delta: delta)
+        invalidateFrame(.camera)
     }
 
     func zoom(factor: Float, anchor: CGPoint) {
         camera.zoom(by: factor, anchor: anchor)
+        invalidateFrame(.camera)
+    }
+
+    func focusSurface(_ id: TerminalSurfaceID?) {
+        let currentFocused = surfaces.focusedSurfaceID()
+        guard currentFocused != id else { return }
+        for surfaceID in surfaces.orderedSurfaceIDs() {
+            _ = surfaces.updateSurface(id: surfaceID) { surface in
+                if surfaceID == id {
+                    surface.flags.insert(.focused)
+                } else {
+                    surface.flags.remove(.focused)
+                }
+            }
+        }
+        invalidateFrame(.overlay)
+    }
+
+    func moveSurface(_ id: TerminalSurfaceID, delta: CGSize) {
+        let didUpdate = surfaces.updateSurface(id: id) { surface in
+            surface.origin.x += delta.width / CGFloat(camera.zoom)
+            surface.origin.y += delta.height / CGFloat(camera.zoom)
+        }
+        guard
+            delta != .zero,
+            didUpdate
+        else {
+            return
+        }
+        invalidateFrame([.surfaces, .overlay])
     }
 
     func render(drawable: CAMetalDrawable) {
@@ -170,6 +209,10 @@ final class EngineRuntime: ObservableObject {
         } else {
             textureBudgetWarning = nil
         }
+    }
+
+    private func invalidateFrame(_ reasons: FrameInvalidationReasons) {
+        onFrameInvalidation?(reasons)
     }
 
     static func demoSurfaces(profileID: String) -> [TerminalSurface] {

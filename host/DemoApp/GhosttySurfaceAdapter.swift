@@ -140,6 +140,7 @@ final class GhosttySurfaceAdapter: ObservableObject {
 
     let profile: RenderProfile
     let bootstrap: GhosttySurfaceBootstrap
+    var onFrameInvalidation: ((FrameInvalidationReasons) -> Void)?
 
     private var config: ghostty_config_t?
     private var app: ghostty_app_t?
@@ -194,6 +195,7 @@ final class GhosttySurfaceAdapter: ObservableObject {
         ghostty_surface_draw(surface)
         tick()
         publishLatestSurfaceTexture()
+        onFrameInvalidation?(.timer)
     }
 
     func tick() {
@@ -201,6 +203,7 @@ final class GhosttySurfaceAdapter: ObservableObject {
         ghostty_app_tick(app)
         status = bootError == nil ? "running" : "failed"
         publishLatestSurfaceTexture()
+        onFrameInvalidation?(.timer)
     }
 
     func ingestOutput(_ text: String) {
@@ -437,6 +440,9 @@ final class GhosttySurfaceAdapter: ObservableObject {
             throw GhosttyAdapterError.appCreationFailed
         }
         self.app = app
+        texturePublisher?.didPublishGeneration = { [weak self] _ in
+            self?.onFrameInvalidation?(.texture)
+        }
 
         var surfaceConfig = ghostty_surface_config_new()
         surfaceConfig.platform_tag = GHOSTTY_PLATFORM_MACOS

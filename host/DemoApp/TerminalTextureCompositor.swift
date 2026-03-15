@@ -61,6 +61,10 @@ struct CanvasCamera: Equatable {
             y: CGFloat(Float(point.y) / zoom + panY)
         )
     }
+
+    func canvasPoint(fromScreen point: CGPoint) -> CGPoint {
+        screenToCanvas(point)
+    }
 }
 
 struct TerminalTextureQuad {
