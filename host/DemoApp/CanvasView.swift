@@ -4,9 +4,10 @@ import SwiftUI
 
 struct CanvasView: NSViewRepresentable {
     @ObservedObject var runtime: EngineRuntime
+    @ObservedObject var textureSource: GhosttySurfaceAdapter
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(runtime: runtime)
+        Coordinator(runtime: runtime, textureSource: textureSource)
     }
 
     func makeNSView(context: Context) -> MetalCanvasView {
@@ -30,10 +31,12 @@ struct CanvasView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, MTKViewDelegate, CanvasInputHandler {
         private let runtime: EngineRuntime
+        private let textureSource: GhosttySurfaceAdapter
         private var queue: MTLCommandQueue?
 
-        init(runtime: EngineRuntime) {
+        init(runtime: EngineRuntime, textureSource: GhosttySurfaceAdapter) {
             self.runtime = runtime
+            self.textureSource = textureSource
         }
 
         func attach(view: MTKView, device: MTLDevice) {
@@ -46,6 +49,10 @@ struct CanvasView: NSViewRepresentable {
 
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable else { return }
+            runtime.setSharedTerminalTexture(
+                textureSource.latestFrontTexture(),
+                generation: textureSource.latestTextureGeneration()
+            )
             runtime.render(drawable: drawable)
         }
 

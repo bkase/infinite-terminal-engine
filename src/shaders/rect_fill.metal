@@ -24,6 +24,22 @@ struct VertexOut {
     float4 color;
 };
 
+struct TexturedQuad {
+    float x;
+    float y;
+    float w;
+    float h;
+    float u0;
+    float v0;
+    float u1;
+    float v1;
+};
+
+struct TexturedVertexOut {
+    float4 position [[position]];
+    float2 uv;
+};
+
 vertex VertexOut rect_vertex(
     uint vertex_id [[vertex_id]],
     uint instance_id [[instance_id]],
@@ -63,4 +79,39 @@ vertex VertexOut rect_vertex(
 
 fragment float4 rect_fragment(VertexOut in [[stage_in]]) {
     return in.color;
+}
+
+vertex TexturedVertexOut textured_quad_vertex(
+    uint vertex_id [[vertex_id]],
+    constant CameraUniform& camera [[buffer(0)]],
+    constant TexturedQuad& quad [[buffer(1)]]
+) {
+    constexpr float2 unit_quad[6] = {
+        float2(0.0, 0.0),
+        float2(1.0, 0.0),
+        float2(0.0, 1.0),
+        float2(1.0, 0.0),
+        float2(1.0, 1.0),
+        float2(0.0, 1.0),
+    };
+
+    float2 unit = unit_quad[vertex_id];
+    float2 canvas = float2(quad.x, quad.y) + unit * float2(quad.w, quad.h);
+    float x = camera.transform[0] * canvas.x + camera.transform[2] * canvas.y + camera.transform[4];
+    float y = camera.transform[1] * canvas.x + camera.transform[3] * canvas.y + camera.transform[5];
+    float ndc_x = (x / float(camera.viewport_width_px)) * 2.0 - 1.0;
+    float ndc_y = 1.0 - (y / float(camera.viewport_height_px)) * 2.0;
+
+    TexturedVertexOut out;
+    out.position = float4(ndc_x, ndc_y, 0.0, 1.0);
+    out.uv = mix(float2(quad.u0, quad.v0), float2(quad.u1, quad.v1), unit);
+    return out;
+}
+
+fragment float4 textured_quad_fragment(
+    TexturedVertexOut in [[stage_in]],
+    texture2d<float> terminal_texture [[texture(0)]]
+) {
+    constexpr sampler texture_sampler(mag_filter::nearest, min_filter::nearest);
+    return terminal_texture.sample(texture_sampler, in.uv);
 }

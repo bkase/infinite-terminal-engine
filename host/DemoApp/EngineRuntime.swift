@@ -1,5 +1,4 @@
 import Foundation
-import EngineABI
 import Metal
 import QuartzCore
 
@@ -19,11 +18,10 @@ final class EngineRuntime: ObservableObject {
     let renderProfileID: String
     private(set) var surfaces = SurfaceStore()
     private var profilesByID: [String: RenderProfile] = [:]
-
-    private let bindings = EngineBindings.shared
-    nonisolated(unsafe) private var engine: OpaquePointer?
-    private var didInitialize = false
-    private var queue: MTLCommandQueue?
+    private var camera = CanvasCamera()
+    private var compositor: TerminalTextureCompositor?
+    private var sharedTexture: MTLTexture?
+    private var sharedTextureGeneration: UInt64 = 0
 
     init() {
         let renderProfile: RenderProfile
@@ -37,74 +35,41 @@ final class EngineRuntime: ObservableObject {
 
         renderProfileID = renderProfile.id
         profilesByID = [renderProfile.id: renderProfile]
-        var handle: OpaquePointer?
-        var config = ite_EngineConfig(
-            abi_version: bindings.headerVersion(),
-            max_rects: 512,
-            max_visible_rects: 512,
-            initial_width_px: 1280,
-            initial_height_px: 720,
-            min_zoom: 1.0e-9,
-            max_zoom: 1.0e9
-        )
-        precondition(bindings.create(&handle, &config) == ite_EngineStatus_ok)
-        engine = handle
+        camera.resize(width: 1280, height: 720)
         surfaces.replaceAll(with: Self.demoSurfaces(profileID: renderProfile.id))
-        syncSceneRects()
-    }
-
-    deinit {
-        bindings.destroy(engine)
     }
 
     func initializeIfNeeded(device: MTLDevice, queue: MTLCommandQueue) {
+        _ = queue
         guard bootError == nil else { return }
-        guard !didInitialize, let engine else { return }
-        self.queue = queue
-        guard let metallibURL = Bundle.module.url(forResource: "rect_fill", withExtension: "metallib") else { return }
-        let status = metallibURL.path.withCString { path in
-            bindings.initWithMetallibPath(
-                engine,
-                Unmanaged.passUnretained(device).toOpaque(),
-                Unmanaged.passUnretained(queue).toOpaque(),
-                path
-            )
+        if compositor == nil {
+            compositor = TerminalTextureCompositor(device: device)
         }
-        didInitialize = status == ite_EngineStatus_ok
-    }
-
-    func replaceRects(_ rects: [CanvasRect]) {
-        guard bootError == nil else { return }
-        guard let engine else { return }
-        var payloads = rects.map { rect in
-            ite_Rect(x: rect.x, y: rect.y, w: rect.w, h: rect.h, color_rgba8: rect.color, _pad0: 0, _pad1: 0, _pad2: 0)
-        }
-        _ = payloads.withUnsafeMutableBufferPointer { buffer in
-            bindings.replaceRects(engine, buffer.baseAddress!, buffer.count)
+        if compositor == nil {
+            bootError = "Missing texture compositor pipeline."
         }
     }
 
     func replaceSurfaces(_ surfaces: [TerminalSurface]) {
         self.surfaces.replaceAll(with: surfaces)
-        syncSceneRects()
+    }
+
+    func setSharedTerminalTexture(_ texture: MTLTexture?, generation: UInt64) {
+        guard generation >= sharedTextureGeneration else { return }
+        sharedTexture = texture
+        sharedTextureGeneration = generation
     }
 
     func resize(width: Int, height: Int) {
-        guard bootError == nil else { return }
-        guard let engine else { return }
-        _ = bindings.resize(engine, UInt32(width), UInt32(height))
+        camera.resize(width: width, height: height)
     }
 
     func pan(delta: CGSize) {
-        guard bootError == nil else { return }
-        guard let engine else { return }
-        _ = bindings.pan(engine, Float(delta.width), Float(delta.height))
+        camera.pan(delta: delta)
     }
 
     func zoom(factor: Float, anchor: CGPoint) {
-        guard bootError == nil else { return }
-        guard let engine else { return }
-        _ = bindings.zoom(engine, factor, Float(anchor.x), Float(anchor.y))
+        camera.zoom(by: factor, anchor: anchor)
     }
 
     func render(drawable: CAMetalDrawable) {
@@ -112,57 +77,73 @@ final class EngineRuntime: ObservableObject {
             statsSummary = bootError
             return
         }
-        guard let engine else { return }
-        let status = bindings.render(engine, Unmanaged.passUnretained(drawable).toOpaque())
-        if status == ite_EngineStatus_ok {
-            updateStats()
-        } else if let error = bindings.getLastError(engine) {
-            statsSummary = String(cString: error)
+        guard let compositor else { return }
+        let frame = buildFrame()
+        if compositor.render(drawable: drawable, camera: camera, quads: frame.quads, overlays: frame.overlays) {
+            updateStats(visibleSurfaceCount: frame.quads.count)
+        } else {
+            statsSummary = "texture compositor render failed"
         }
     }
 
-    private func updateStats() {
-        guard let engine else { return }
-        var stats = ite_FrameStats()
-        _ = bindings.getStats(engine, &stats)
-        statsSummary = "\(stats.visible_rects) / \(stats.total_rects) visible • \(surfaces.count) surfaces • \(renderProfileID)"
+    private func updateStats(visibleSurfaceCount: Int) {
+        statsSummary = "\(visibleSurfaceCount) / \(surfaces.count) visible • \(surfaces.count) surfaces • \(renderProfileID)"
     }
 
-    private func syncSceneRects(backingScale: CGFloat = 1) {
-        let sceneRects = surfaces.orderedSurfaceIDs().compactMap { id -> [CanvasRect]? in
-            guard let geometry = surfaces.geometry(for: id, profilesByID: profilesByID, backingScale: backingScale),
+    private func buildFrame() -> (quads: [TerminalTextureQuad], overlays: [CanvasRect]) {
+        let orderedIDs = surfaces.orderedSurfaceIDs()
+        let quads = orderedIDs.compactMap { id -> TerminalTextureQuad? in
+            guard
+                let geometry = surfaces.geometry(for: id, profilesByID: profilesByID, backingScale: 1),
+                let texture = sharedTexture
+            else {
+                return nil
+            }
+            return TerminalTextureQuad(frame: geometry.contentFrame, texture: texture)
+        }
+        let overlays = orderedIDs.compactMap { id -> [CanvasRect]? in
+            guard
+                let geometry = surfaces.geometry(for: id, profilesByID: profilesByID, backingScale: 1),
                 let surface = surfaces.surface(id: id)
             else {
                 return nil
             }
 
-            let bodyColor: UInt32 = surface.flags.contains(.focused) ? 0x233a50ff : 0x1b2534ff
-            let titleColor: UInt32 = surface.flags.contains(.focused) ? 0x4d9de0ff : 0x31445dff
-            let borderInset: Float = 1
-            let bodyRect = CanvasRect(
-                x: Float(geometry.frame.minX),
-                y: Float(geometry.frame.minY),
-                w: Float(geometry.frame.width),
-                h: Float(geometry.frame.height),
-                color: bodyColor
-            )
-            let titleRect = CanvasRect(
-                x: Float(geometry.titlebarFrame.minX),
-                y: Float(geometry.titlebarFrame.minY),
-                w: Float(geometry.titlebarFrame.width),
-                h: Float(geometry.titlebarFrame.height),
-                color: titleColor
-            )
-            let contentRect = CanvasRect(
-                x: Float(geometry.contentFrame.minX - CGFloat(borderInset)),
-                y: Float(geometry.contentFrame.minY - CGFloat(borderInset)),
-                w: Float(geometry.contentFrame.width + CGFloat(borderInset * 2)),
-                h: Float(geometry.contentFrame.height + CGFloat(borderInset * 2)),
-                color: 0x0f1722ff
-            )
-            return [bodyRect, titleRect, contentRect]
+            let bodyColor: UInt32 = surface.flags.contains(.focused) ? 0x233a_50ff : 0x1b25_34ff
+            let titleColor: UInt32 = surface.flags.contains(.focused) ? 0x4d9d_e0ff : 0x3144_5dff
+            let borderThickness: Float = 2
+            return [
+                CanvasRect(
+                    x: Float(geometry.frame.minX),
+                    y: Float(geometry.frame.minY),
+                    w: Float(geometry.frame.width),
+                    h: Float(geometry.frame.height),
+                    color: bodyColor
+                ),
+                CanvasRect(
+                    x: Float(geometry.contentFrame.minX),
+                    y: Float(geometry.contentFrame.minY),
+                    w: Float(geometry.contentFrame.width),
+                    h: Float(geometry.contentFrame.height),
+                    color: 0x0000_00ff
+                ),
+                CanvasRect(
+                    x: Float(geometry.titlebarFrame.minX),
+                    y: Float(geometry.titlebarFrame.minY),
+                    w: Float(geometry.titlebarFrame.width),
+                    h: Float(geometry.titlebarFrame.height),
+                    color: titleColor
+                ),
+                CanvasRect(
+                    x: Float(geometry.contentFrame.minX - CGFloat(borderThickness)),
+                    y: Float(geometry.contentFrame.minY - CGFloat(borderThickness)),
+                    w: Float(geometry.contentFrame.width + CGFloat(borderThickness * 2)),
+                    h: borderThickness,
+                    color: titleColor
+                ),
+            ]
         }
-        replaceRects(sceneRects.flatMap { $0 })
+        return (quads, overlays.flatMap { $0 })
     }
 
     static func demoSurfaces(profileID: String) -> [TerminalSurface] {

@@ -24,7 +24,7 @@ struct HostShellView: View {
     var body: some View {
         HSplitView {
             ZStack(alignment: .topLeading) {
-                CanvasView(runtime: runtime)
+                CanvasView(runtime: runtime, textureSource: terminalAdapter)
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Spatial Terminal Host")
                         .font(.headline)
