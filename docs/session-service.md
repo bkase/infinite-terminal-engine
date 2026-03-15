@@ -8,6 +8,7 @@
 
 - PTY lifecycle state (`provisioning`, `running`, `exited`, `failed`)
 - canonical session size
+- authoritative resize reconciliation (`desired`, `applied`, `acknowledged`, `failed`)
 - monotonic `outputSeq`
 - subscriber membership and fanout
 - failure diagnostics and exit status
@@ -35,6 +36,7 @@ The actor exposes deterministic deliveries for tests and transport integration:
 - `bootstrap`: redraw bytes plus the live-stream anchor
 - `output`: ordered byte chunks with inclusive sequence ranges
 - `status`: lifecycle transitions with `outputSeq`, `exitCode`, and `failureReason`
+- `status.resize`: desired-vs-actual resize state so clients can surface lag or failed PTY application explicitly
 
 For reconnect and late join, `SessionActor.outputChunks(after:)` slices output by arbitrary anchors, including mid-chunk anchors, so continuation does not depend on transport chunk boundaries.
 
@@ -43,6 +45,7 @@ For reconnect and late join, `SessionActor.outputChunks(after:)` slices output b
 ```bash
 ./scripts/test-session-service.sh
 ./scripts/check-session-service.sh
+./scripts/check-authoritative-resize.sh
 ```
 
-Coverage includes lifecycle transitions, output sequence monotonicity, resource-limit failures, directory/subscriber bookkeeping, and an artifact-validated session transcript with per-session logs for provisioning, exit, and forced-failure scenarios.
+Coverage includes lifecycle transitions, output sequence monotonicity, resource-limit failures, directory/subscriber bookkeeping, authoritative resize reconciliation, and artifact-validated transcripts for provisioning, exit, forced-failure, and resize-lag scenarios.

@@ -250,7 +250,8 @@ final class SessionTransportServer {
             status: state.status,
             outputSeq: state.outputSeq,
             exitCode: state.exitCode,
-            failureReason: state.failureReason
+            failureReason: state.failureReason,
+            resize: state.resizeReconciliation
         )
     }
 

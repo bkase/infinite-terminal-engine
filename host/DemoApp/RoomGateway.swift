@@ -175,7 +175,7 @@ final class RoomGateway {
             switch sideEffect {
             case .controlAcquired(let sessionID, _), .controlReleased(let sessionID):
                 broadcastEphemeral(.leaseUpdated(sessionID, actor.controlLease(for: sessionID)))
-            case .sessionAttached, .sessionDetached:
+            case .sessionAttached, .sessionDetached, .sessionResizeCommitted:
                 break
             }
         }

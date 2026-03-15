@@ -5,6 +5,25 @@ struct TerminalSessionSize: Equatable, Codable {
     var rows: Int
 }
 
+enum SessionResizePhase: String, Equatable, Codable {
+    case desired
+    case applied
+    case acknowledged
+    case failed
+}
+
+struct SessionResizeReconciliation: Equatable, Codable {
+    let revision: UInt64
+    let desiredSize: TerminalSessionSize
+    let actualSize: TerminalSessionSize
+    let phase: SessionResizePhase
+    let failureReason: String?
+
+    var isLagging: Bool {
+        phase != .acknowledged
+    }
+}
+
 struct SessionResourceLimits: Equatable {
     let maxCols: Int
     let maxRows: Int
@@ -68,6 +87,7 @@ struct SessionStatusRecord: Equatable {
     let outputSeq: UInt64
     let exitCode: Int32?
     let failureReason: String?
+    let resize: SessionResizeReconciliation
 }
 
 struct SessionBootstrap: Equatable {
@@ -101,6 +121,7 @@ struct SessionActorState: Equatable {
     let subscriberIDs: [ClientID]
     let exitCode: Int32?
     let failureReason: String?
+    let resizeReconciliation: SessionResizeReconciliation
 }
 
 enum PTYBackendEvent: Equatable {
@@ -126,12 +147,19 @@ enum ReplayLogEntry: Equatable {
     case input([UInt8])
 }
 
+private struct ReplayLogResizeFailure: Error, LocalizedError {
+    let reason: String
+
+    var errorDescription: String? { reason }
+}
+
 final class ReplayLogPTYBackend: PTYBackend {
     var eventSink: ((PTYBackendEvent) -> Void)?
 
     private(set) var currentSize: TerminalSessionSize?
     private(set) var transcript: [ReplayLogEntry] = []
     private(set) var isStopped = false
+    var resizeFailureReason: String?
 
     func start(sessionID: SessionID, initialSize: TerminalSessionSize) throws {
         currentSize = initialSize
@@ -139,6 +167,9 @@ final class ReplayLogPTYBackend: PTYBackend {
     }
 
     func resize(to size: TerminalSessionSize) throws {
+        if let resizeFailureReason {
+            throw ReplayLogResizeFailure(reason: resizeFailureReason)
+        }
         currentSize = size
         transcript.append(.resize(size))
     }
@@ -200,6 +231,7 @@ final class SessionActor {
     private(set) var outputSeq: UInt64 = 0
     private(set) var exitCode: Int32?
     private(set) var failureReason: String?
+    private(set) var resizeReconciliation: SessionResizeReconciliation
 
     private let backend: PTYBackend
     private let resourceLimits: SessionResourceLimits
@@ -224,6 +256,13 @@ final class SessionActor {
         self.bootstrapPolicy = bootstrapPolicy
         self.backend = backend
         self.resourceLimits = resourceLimits
+        self.resizeReconciliation = SessionResizeReconciliation(
+            revision: 0,
+            desiredSize: initialSize,
+            actualSize: initialSize,
+            phase: .acknowledged,
+            failureReason: nil
+        )
 
         try Self.validate(size: initialSize, limits: resourceLimits)
         backend.eventSink = { [weak self] event in
@@ -246,16 +285,103 @@ final class SessionActor {
     }
 
     func resize(to newSize: TerminalSessionSize) throws {
+        _ = try beginAuthoritativeResize(to: newSize, revision: resizeReconciliation.revision + 1)
+        try applyPendingResize(revision: resizeReconciliation.revision)
+        acknowledgePendingResize(revision: resizeReconciliation.revision)
+    }
+
+    @discardableResult
+    func beginAuthoritativeResize(
+        to newSize: TerminalSessionSize,
+        revision: UInt64
+    ) throws -> SessionResizeReconciliation {
         try Self.validate(size: newSize, limits: resourceLimits)
-        size = newSize
-        guard status == .running else { return }
+        guard revision >= resizeReconciliation.revision else {
+            return resizeReconciliation
+        }
+
+        if revision == resizeReconciliation.revision,
+           resizeReconciliation.desiredSize == newSize,
+           resizeReconciliation.phase != .failed
+        {
+            return resizeReconciliation
+        }
+
+        resizeReconciliation = SessionResizeReconciliation(
+            revision: revision,
+            desiredSize: newSize,
+            actualSize: size,
+            phase: newSize == size ? .acknowledged : .desired,
+            failureReason: nil
+        )
+        broadcast(.status(currentStatusRecord()))
+        return resizeReconciliation
+    }
+
+    @discardableResult
+    func applyPendingResize(revision: UInt64) throws -> SessionResizeReconciliation {
+        guard revision == resizeReconciliation.revision else {
+            return resizeReconciliation
+        }
+        guard resizeReconciliation.phase == .desired else {
+            return resizeReconciliation
+        }
+        guard status == .running else {
+            size = resizeReconciliation.desiredSize
+            resizeReconciliation = SessionResizeReconciliation(
+                revision: revision,
+                desiredSize: resizeReconciliation.desiredSize,
+                actualSize: size,
+                phase: .applied,
+                failureReason: nil
+            )
+            broadcast(.status(currentStatusRecord()))
+            return resizeReconciliation
+        }
+
         do {
-            try backend.resize(to: newSize)
+            try backend.resize(to: resizeReconciliation.desiredSize)
+            size = resizeReconciliation.desiredSize
+            resizeReconciliation = SessionResizeReconciliation(
+                revision: revision,
+                desiredSize: resizeReconciliation.desiredSize,
+                actualSize: size,
+                phase: .applied,
+                failureReason: nil
+            )
+            broadcast(.status(currentStatusRecord()))
+            return resizeReconciliation
         } catch {
             let message = error.localizedDescription
-            transitionToFailed(reason: "backend_resize_failed: \(message)")
+            resizeReconciliation = SessionResizeReconciliation(
+                revision: revision,
+                desiredSize: resizeReconciliation.desiredSize,
+                actualSize: size,
+                phase: .failed,
+                failureReason: message
+            )
+            broadcast(.status(currentStatusRecord()))
             throw SessionActorError.backendResizeFailed(message)
         }
+    }
+
+    @discardableResult
+    func acknowledgePendingResize(revision: UInt64) -> SessionResizeReconciliation {
+        guard revision == resizeReconciliation.revision else {
+            return resizeReconciliation
+        }
+        guard resizeReconciliation.phase == .applied else {
+            return resizeReconciliation
+        }
+        resizeReconciliation = SessionResizeReconciliation(
+            revision: revision,
+            desiredSize: resizeReconciliation.desiredSize,
+            actualSize: resizeReconciliation.actualSize,
+            phase: .acknowledged,
+            failureReason: nil
+        )
+        broadcast(.status(currentStatusRecord()))
+        return resizeReconciliation
     }
 
     func sendInput(_ bytes: [UInt8]) throws {
@@ -321,7 +447,8 @@ final class SessionActor {
             outputSeq: outputSeq,
             subscriberIDs: subscriberIDs.sorted { $0.rawValue < $1.rawValue },
             exitCode: exitCode,
-            failureReason: failureReason
+            failureReason: failureReason,
+            resizeReconciliation: resizeReconciliation
         )
     }
 
@@ -404,7 +531,8 @@ final class SessionActor {
             status: status,
             outputSeq: outputSeq,
             exitCode: exitCode,
-            failureReason: failureReason
+            failureReason: failureReason,
+            resize: resizeReconciliation
         )
     }
 

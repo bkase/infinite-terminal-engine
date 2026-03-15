@@ -76,7 +76,13 @@ final class SessionActorTests: XCTestCase {
             actor.deliveries(for: ClientID(rawValue: "client-1")),
             [
                 .bootstrap(bootstrap),
-                .status(SessionStatusRecord(status: .running, outputSeq: 6, exitCode: nil, failureReason: nil)),
+                .status(SessionStatusRecord(
+                    status: .running,
+                    outputSeq: 6,
+                    exitCode: nil,
+                    failureReason: nil,
+                    resize: acknowledgedResize(size: TerminalSessionSize(cols: 80, rows: 24))
+                )),
                 .output(SessionOutputChunk(seqStart: 7, seqEnd: 9, bytes: Array("abc".utf8))),
                 .output(SessionOutputChunk(seqStart: 10, seqEnd: 11, bytes: Array("de".utf8))),
             ]
@@ -156,6 +162,89 @@ final class SessionActorTests: XCTestCase {
             actor.outputChunks(after: 3),
             [SessionOutputChunk(seqStart: 4, seqEnd: 6, bytes: Array("def".utf8))]
         )
+    }
+
+    func testRevisionedResizeStateMachineTracksDesiredAppliedAcknowledgedAndStaleAcks() throws {
+        let backend = TestPTYBackend()
+        let actor = try SessionActor(
+            sessionID: SessionID(rawValue: "session-1"),
+            roomID: RoomID(rawValue: "room-1"),
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            initialSize: TerminalSessionSize(cols: 80, rows: 24),
+            backend: backend
+        )
+        try actor.start()
+
+        let began = try actor.beginAuthoritativeResize(
+            to: TerminalSessionSize(cols: 120, rows: 40),
+            revision: 4
+        )
+        XCTAssertEqual(
+            began,
+            SessionResizeReconciliation(
+                revision: 4,
+                desiredSize: TerminalSessionSize(cols: 120, rows: 40),
+                actualSize: TerminalSessionSize(cols: 80, rows: 24),
+                phase: .desired,
+                failureReason: nil
+            )
+        )
+
+        let applied = try actor.applyPendingResize(revision: 4)
+        XCTAssertEqual(backend.resizeCalls, [TerminalSessionSize(cols: 120, rows: 40)])
+        XCTAssertEqual(
+            applied,
+            SessionResizeReconciliation(
+                revision: 4,
+                desiredSize: TerminalSessionSize(cols: 120, rows: 40),
+                actualSize: TerminalSessionSize(cols: 120, rows: 40),
+                phase: .applied,
+                failureReason: nil
+            )
+        )
+
+        XCTAssertEqual(
+            actor.acknowledgePendingResize(revision: 3),
+            applied
+        )
+        XCTAssertEqual(
+            actor.acknowledgePendingResize(revision: 4),
+            acknowledgedResize(revision: 4, size: TerminalSessionSize(cols: 120, rows: 40))
+        )
+    }
+
+    func testFailedResizeKeepsDesiredVsActualExplicitUntilRetrySucceeds() throws {
+        let backend = TestPTYBackend()
+        backend.resizeError = TestFailure(reason: "winsize ioctl failed")
+        let actor = try SessionActor(
+            sessionID: SessionID(rawValue: "session-1"),
+            roomID: RoomID(rawValue: "room-1"),
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            initialSize: TerminalSessionSize(cols: 80, rows: 24),
+            backend: backend
+        )
+        try actor.start()
+
+        _ = try actor.beginAuthoritativeResize(to: TerminalSessionSize(cols: 100, rows: 30), revision: 2)
+        XCTAssertThrowsError(try actor.applyPendingResize(revision: 2)) { error in
+            XCTAssertEqual(error as? SessionActorError, .backendResizeFailed("winsize ioctl failed"))
+        }
+        XCTAssertEqual(
+            actor.state().resizeReconciliation,
+            SessionResizeReconciliation(
+                revision: 2,
+                desiredSize: TerminalSessionSize(cols: 100, rows: 30),
+                actualSize: TerminalSessionSize(cols: 80, rows: 24),
+                phase: .failed,
+                failureReason: "winsize ioctl failed"
+            )
+        )
+
+        backend.resizeError = nil
+        _ = try actor.beginAuthoritativeResize(to: TerminalSessionSize(cols: 100, rows: 30), revision: 3)
+        _ = try actor.applyPendingResize(revision: 3)
+        let acknowledged = actor.acknowledgePendingResize(revision: 3)
+        XCTAssertEqual(acknowledged, acknowledgedResize(revision: 3, size: TerminalSessionSize(cols: 100, rows: 30)))
     }
 
     func testSubscriberBookkeepingAndDirectoryLifecycle() throws {
@@ -246,6 +335,7 @@ private final class TestPTYBackend: PTYBackend {
     var bootstrapError: TestFailure?
     var bootstrapBytes: [UInt8]
     var didStop = false
+    var resizeCalls: [TerminalSessionSize] = []
 
     init(bootstrapBytes: [UInt8] = []) {
         self.bootstrapBytes = bootstrapBytes
@@ -261,6 +351,7 @@ private final class TestPTYBackend: PTYBackend {
         if let resizeError {
             throw resizeError
         }
+        resizeCalls.append(size)
     }
 
     func writeInput(_ bytes: [UInt8]) throws {
@@ -283,4 +374,17 @@ private final class TestPTYBackend: PTYBackend {
     func emit(_ event: PTYBackendEvent) {
         eventSink?(event)
     }
+}
+
+private func acknowledgedResize(
+    revision: UInt64 = 0,
+    size: TerminalSessionSize
+) -> SessionResizeReconciliation {
+    SessionResizeReconciliation(
+        revision: revision,
+        desiredSize: size,
+        actualSize: size,
+        phase: .acknowledged,
+        failureReason: nil
+    )
 }

@@ -41,6 +41,7 @@ enum RoomActorError: Error, Equatable, LocalizedError {
 enum RoomActorSideEffect: Equatable {
     case sessionAttached(surfaceID: TerminalSurfaceID, sessionID: SessionID)
     case sessionDetached(surfaceID: TerminalSurfaceID, sessionID: SessionID)
+    case sessionResizeCommitted(surfaceID: TerminalSurfaceID, sessionID: SessionID, size: TerminalSessionSize)
     case controlAcquired(sessionID: SessionID, holderUserID: UserID)
     case controlReleased(sessionID: SessionID)
 }
@@ -150,6 +151,15 @@ enum RoomStateReducer {
             let index = try surfaceIndex(for: op.surfaceID)
             surfaces[index].cols = op.cols
             surfaces[index].rows = op.rows
+            if let sessionID = surfaces[index].sessionID {
+                sideEffects.append(
+                    .sessionResizeCommitted(
+                        surfaceID: op.surfaceID,
+                        sessionID: sessionID,
+                        size: TerminalSessionSize(cols: op.cols, rows: op.rows)
+                    )
+                )
+            }
         case .setStackRank(let op):
             let index = try surfaceIndex(for: op.surfaceID)
             let surface = surfaces.remove(at: index)
@@ -237,7 +247,7 @@ enum RoomStateReducer {
                 )
             case .controlReleased(let sessionID):
                 leaseBySessionID.removeValue(forKey: sessionID)
-            case .sessionAttached, .sessionDetached:
+            case .sessionAttached, .sessionDetached, .sessionResizeCommitted:
                 break
             }
         }

@@ -19,7 +19,13 @@ final class SessionTransportTests: XCTestCase {
                     exitCode: nil,
                     failureReason: nil
                 )),
-                .status(SessionStatusRecord(status: .running, outputSeq: 6, exitCode: nil, failureReason: nil)),
+                .status(SessionStatusRecord(
+                    status: .running,
+                    outputSeq: 6,
+                    exitCode: nil,
+                    failureReason: nil,
+                    resize: acknowledgedResize(size: TerminalSessionSize(cols: 80, rows: 24))
+                )),
             ]
         )
 
@@ -75,7 +81,13 @@ final class SessionTransportTests: XCTestCase {
             [
                 .output(SessionOutputChunk(seqStart: 9, seqEnd: 9, bytes: Array("c".utf8))),
                 .output(SessionOutputChunk(seqStart: 10, seqEnd: 11, bytes: Array("de".utf8))),
-                .status(SessionStatusRecord(status: .running, outputSeq: 11, exitCode: nil, failureReason: nil)),
+                .status(SessionStatusRecord(
+                    status: .running,
+                    outputSeq: 11,
+                    exitCode: nil,
+                    failureReason: nil,
+                    resize: acknowledgedResize(size: TerminalSessionSize(cols: 80, rows: 24))
+                )),
             ]
         )
         XCTAssertEqual(reconnect.diagnostics().resumeMode, .replay)
@@ -102,7 +114,13 @@ final class SessionTransportTests: XCTestCase {
                     exitCode: nil,
                     failureReason: nil
                 )),
-                .status(SessionStatusRecord(status: .running, outputSeq: 6, exitCode: nil, failureReason: nil)),
+                .status(SessionStatusRecord(
+                    status: .running,
+                    outputSeq: 6,
+                    exitCode: nil,
+                    failureReason: nil,
+                    resize: acknowledgedResize(size: TerminalSessionSize(cols: 80, rows: 24))
+                )),
             ]
         )
     }
@@ -200,6 +218,19 @@ final class SessionTransportTests: XCTestCase {
         )
         return fixture
     }
+}
+
+private func acknowledgedResize(
+    revision: UInt64 = 0,
+    size: TerminalSessionSize
+) -> SessionResizeReconciliation {
+    SessionResizeReconciliation(
+        revision: revision,
+        desiredSize: size,
+        actualSize: size,
+        phase: .acknowledged,
+        failureReason: nil
+    )
 }
 
 private final class SessionTransportFixture {
