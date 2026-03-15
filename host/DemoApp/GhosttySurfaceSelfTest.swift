@@ -60,12 +60,23 @@ final class GhosttySurfaceSelfTestDriver: ObservableObject {
         }
 
         let initialTexture = try await expectTexture("surface never produced an IOSurface-backed texture")
+        let initialGeneration = adapter.latestTextureGeneration()
         adapter.ingestOutput("selftest-visible-alpha\n")
         adapter.requestRender()
 
         try await expect("loopback text never became visible") {
             self.adapter.visibleText().contains("selftest-visible-alpha")
         }
+
+        try await expect("published texture generation never advanced") {
+            self.adapter.latestTextureGeneration() > initialGeneration
+        }
+
+        guard let imePoint = adapter.imePoint(), imePoint.width >= 0, imePoint.height >= 0 else {
+            throw GhosttySurfaceSelfTestError.missingTexture("surface did not expose an IME anchor point")
+        }
+
+        _ = imePoint
 
         adapter.resizeHost(to: CGSize(width: 720, height: 420))
         adapter.requestRender()
@@ -83,6 +94,30 @@ final class GhosttySurfaceSelfTestDriver: ObservableObject {
 
         guard adapter.latestFrontTexture() != nil else {
             throw GhosttySurfaceSelfTestError.missingTexture("surface lost its published front texture after resize")
+        }
+
+        try await expect("select_all did not produce a readable selection") {
+            _ = self.adapter.performBindingAction("select_all")
+            guard let selection = self.adapter.selectionState() else { return false }
+            return selection.contains("selftest-visible-alpha") && selection.contains("selftest-visible-beta")
+        }
+
+        adapter.copySelectionToClipboard()
+        guard let copiedSelection = NSPasteboard.general.string(forType: .string),
+            copiedSelection.contains("selftest-visible-alpha"),
+            copiedSelection.contains("selftest-visible-beta")
+        else {
+            throw GhosttySurfaceSelfTestError.timedOut("copySelectionToClipboard did not update the pasteboard")
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("selftest-visible-gamma\n", forType: .string)
+        guard adapter.performBindingAction("paste_from_clipboard") else {
+            throw GhosttySurfaceSelfTestError.timedOut("paste_from_clipboard binding was not accepted")
+        }
+
+        try await expect("paste_from_clipboard did not round-trip through embedded mode") {
+            self.adapter.visibleText().contains("selftest-visible-gamma")
         }
     }
 

@@ -24,6 +24,40 @@ private func ghosttyAdapterFromUserdata(_ userdata: UnsafeMutableRawPointer?) ->
     return Unmanaged<GhosttySurfaceAdapter>.fromOpaque(userdata).takeUnretainedValue()
 }
 
+private func readClipboardString(location: ghostty_clipboard_e) -> String? {
+    let pasteboard = location == GHOSTTY_CLIPBOARD_SELECTION ? NSPasteboard.general : NSPasteboard.general
+    return pasteboard.string(forType: .string)
+}
+
+private func shouldConfirmClipboardRead(text: String, request: ghostty_clipboard_request_e) -> Bool {
+    _ = request
+    return !text.isEmpty
+}
+
+private func writeClipboard(
+    location: ghostty_clipboard_e,
+    content: UnsafePointer<ghostty_clipboard_content_s>?,
+    len: Int,
+    confirm: Bool
+) {
+    _ = location
+    _ = confirm
+    guard let content, len > 0 else { return }
+    let items = UnsafeBufferPointer(start: content, count: len)
+    guard let first = items.first(where: {
+        guard let mime = $0.mime else { return false }
+        return String(cString: mime) == "text/plain"
+    }) ?? items.first,
+    let data = first.data
+    else {
+        return
+    }
+
+    let string = String(cString: data)
+    NSPasteboard.general.clearContents()
+    NSPasteboard.general.setString(string, forType: .string)
+}
+
 private func ghosttyWakeupCallback(_ userdata: UnsafeMutableRawPointer?) {
     guard let adapter = ghosttyAdapterFromUserdata(userdata) else { return }
     Task { @MainActor in
@@ -44,10 +78,19 @@ private func ghosttyReadClipboardCallback(
     _ location: ghostty_clipboard_e,
     _ state: UnsafeMutableRawPointer?
 ) -> Bool {
-    _ = userdata
-    _ = location
-    _ = state
-    return false
+    guard
+        let adapter = ghosttyAdapterFromUserdata(userdata),
+        let surface = adapter.surface,
+        let state,
+        let text = readClipboardString(location: location)
+    else {
+        return false
+    }
+
+    text.withCString { ptr in
+        ghostty_surface_complete_clipboard_request(surface, ptr, state, true)
+    }
+    return true
 }
 
 private func ghosttyConfirmReadClipboardCallback(
@@ -56,10 +99,19 @@ private func ghosttyConfirmReadClipboardCallback(
     _ state: UnsafeMutableRawPointer?,
     _ request: ghostty_clipboard_request_e
 ) {
-    _ = userdata
-    _ = text
-    _ = state
-    _ = request
+    guard
+        let adapter = ghosttyAdapterFromUserdata(userdata),
+        let surface = adapter.surface,
+        let state,
+        let text
+    else {
+        return
+    }
+
+    let string = String(cString: text)
+    string.withCString { ptr in
+        ghostty_surface_complete_clipboard_request(surface, ptr, state, shouldConfirmClipboardRead(text: string, request: request))
+    }
 }
 
 private func ghosttyWriteClipboardCallback(
@@ -69,11 +121,8 @@ private func ghosttyWriteClipboardCallback(
     _ len: Int,
     _ confirm: Bool
 ) {
-    _ = userdata
-    _ = location
-    _ = content
-    _ = len
-    _ = confirm
+    guard ghosttyAdapterFromUserdata(userdata) != nil else { return }
+    writeClipboard(location: location, content: content, len: len, confirm: confirm)
 }
 
 private func ghosttyCloseSurfaceCallback(_ userdata: UnsafeMutableRawPointer?, _ processAlive: Bool) {
@@ -94,7 +143,7 @@ final class GhosttySurfaceAdapter: ObservableObject {
 
     private var config: ghostty_config_t?
     private var app: ghostty_app_t?
-    fileprivate var surface: ghostty_surface_t?
+    nonisolated(unsafe) fileprivate var surface: ghostty_surface_t?
     private weak var hostView: NSView?
     private var lastPixelSize: CGSize = .zero
     private let textureDevice = MTLCreateSystemDefaultDevice()
@@ -246,6 +295,24 @@ final class GhosttySurfaceAdapter: ObservableObject {
     func pasteRequest() -> TerminalInputRoute {
         guard let text = readClipboardString(location: GHOSTTY_CLIPBOARD_STANDARD) else { return .ignored }
         return routePaste(text, bracketed: true)
+    }
+
+    func performBindingAction(_ action: String) -> Bool {
+        guard let surface else { return false }
+        return action.withCString { ptr in
+            ghostty_surface_binding_action(surface, ptr, UInt(action.lengthOfBytes(using: .utf8)))
+        }
+    }
+
+    func imePoint() -> CGRect? {
+        guard let surface else { return nil }
+        var x = 0.0
+        var y = 0.0
+        var width = 0.0
+        var height = 0.0
+        ghostty_surface_ime_point(surface, &x, &y, &width, &height)
+        guard width >= 0, height >= 0 else { return nil }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     func resize(to pixelSize: CGSize, backingScale: Double) {
@@ -404,11 +471,6 @@ final class GhosttySurfaceAdapter: ObservableObject {
         let height = UInt32(max(Int(pixelSize.height), 1))
         ghostty_surface_set_content_scale(surface, backingScale, backingScale)
         ghostty_surface_set_size(surface, width, height)
-    }
-
-    private func readClipboardString(location: ghostty_clipboard_e) -> String? {
-        let pasteboard = location == GHOSTTY_CLIPBOARD_SELECTION ? NSPasteboard.general : NSPasteboard.general
-        return pasteboard.string(forType: .string)
     }
 
     private func withSurfaceKeyEvent(_ input: GhosttyKeyInput, _ body: (ghostty_input_key_s) -> Void) {
