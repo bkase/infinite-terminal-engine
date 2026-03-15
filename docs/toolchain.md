@@ -23,7 +23,7 @@ Fast lane coverage:
 - `compositor-gpu`: `zig build test-gpu`
 - `host-shell`: `zig build host`
 - `ghostty-wrapper`: `scripts/test-ghostty-wrapper.sh`
-- `room`: `scripts/test-room.sh` when that bead lands
+- `room`: `scripts/test-room.sh`
 - `multiplayer`: `scripts/test-multiplayer.sh` when that bead lands
 
 Failure injection:
