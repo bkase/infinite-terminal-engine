@@ -12,3 +12,4 @@ host/.swiftpm/
 host/DemoApp/Resources/*.metallib
 host/DemoApp/Resources/*.dylib
 host/DemoApp/Resources/Fonts/PragmataPro_*.ttf
+artifacts/verification-lanes/

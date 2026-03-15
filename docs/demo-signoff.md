@@ -2,9 +2,12 @@
 
 Automated gate:
 
+- `scripts/verify-slow.sh`
 - `scripts/verify-demo.sh`
 
-The slow lane already includes the authoritative fast lane from `scripts/verify-commit.sh`, packaging verification, and the release Swift host build.
+The slow lane already includes the authoritative fast lane from `scripts/verify-commit.sh`, observability, replay, security, packaging verification, and the release Swift host build. The demo lane layers the real DemoApp startup self-test on top.
+
+Retained lane logs and summaries land under `artifacts/verification-lanes/<lane>/<run-id>/`.
 
 Manual checklist on Apple Silicon:
 

@@ -11,6 +11,9 @@ Verification entrypoints:
 
 - `scripts/install-hooks.sh`
 - `scripts/verify-commit.sh`
+- `scripts/verify-fast.sh`
+- `scripts/verify-slow.sh`
+- `scripts/verify-soak.sh`
 - `scripts/verify-commit-failure.sh [lane]`
 - `scripts/verify-demo.sh`
 - `scripts/test-ghostty-wrapper.sh`
@@ -22,8 +25,11 @@ Verification entrypoints:
 
 Fast vs slow lanes:
 
-- Fast lane: `.githooks/pre-commit` runs `scripts/verify-commit.sh` and is the authoritative local/CI commit gate.
-- Slow lane: `scripts/verify-demo.sh` reruns the fast lane, verifies packaging, and performs the release host build.
+- Fast lane: `.githooks/pre-commit` runs `scripts/verify-commit.sh`, which delegates to the canonical `scripts/verify-fast.sh` gate.
+- Slow lane: `scripts/verify-slow.sh` reruns the fast lane, then adds observability, N=50 stress, multiplayer, replay, security, packaging, and release-build checks.
+- Soak lane: `scripts/verify-soak.sh` runs a bounded reconnect/session-churn loop and retains per-step logs under `artifacts/verification-lanes/soak/`.
+- Demo lane: `scripts/verify-demo.sh` runs the slow lane plus the real DemoApp startup self-test.
+- Lane artifacts: `docs/verification-lanes.md` documents retained summaries and per-step logs under `artifacts/verification-lanes/<lane>/<run-id>/`.
 - Artifact contract: `scripts/test-verification-artifacts.sh` emits and validates the canonical retained bundle layout used by future room/session/client/compositor/security verification harnesses.
 - Failure injection: `scripts/verify-commit-failure.sh host-shell` proves the hook rejects representative lane failures with specific output.
 - Ghostty vendor contract: `docs/ghostty-vendor.md` records the pinned snapshot and the wrapper-only boundary.

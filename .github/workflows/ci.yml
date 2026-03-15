@@ -6,19 +6,19 @@ on:
   pull_request:
 
 jobs:
-  commit-gate:
+  fast-gate:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Install repo hooks
         run: scripts/install-hooks.sh
-      - name: Verify commit gate
-        run: scripts/verify-commit.sh
-  demo-gate:
+      - name: Verify fast gate
+        run: scripts/verify-fast.sh
+  slow-gate:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Install repo hooks
         run: scripts/install-hooks.sh
-      - name: Verify demo gate
-        run: scripts/verify-demo.sh
+      - name: Verify slow gate
+        run: scripts/verify-slow.sh
