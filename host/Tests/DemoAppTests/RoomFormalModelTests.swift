@@ -331,16 +331,31 @@ private struct FormalRoomModel {
             surfaces[index].sessionID = nil
             surfaces[index].state = .disconnected
         case .acquireControl(let op):
-            let nextEpoch = (lastLeaseEpochBySessionID[op.sessionID] ?? 0) + 1
-            lastLeaseEpochBySessionID[op.sessionID] = nextEpoch
-            leaseBySessionID[op.sessionID] = ControlLeaseRecord(
-                sessionID: op.sessionID,
-                holderUserID: op.holderUserID,
-                leaseEpoch: nextEpoch,
-                acquiredAtMillis: record.submittedAtMillis,
-                expiresAtMillis: record.submittedAtMillis + 30_000
-            )
+            guard surfaces.contains(where: { $0.sessionID == op.sessionID }) else {
+                throw RoomActorError.sessionNotAttached(op.sessionID)
+            }
+            if let existingLease = leaseBySessionID[op.sessionID] {
+                guard existingLease.holderUserID == op.holderUserID else {
+                    throw RoomActorError.controlLeaseHeldByAnotherUser(
+                        op.sessionID,
+                        holderUserID: existingLease.holderUserID ?? UserID(rawValue: "unknown")
+                    )
+                }
+            } else {
+                let nextEpoch = (lastLeaseEpochBySessionID[op.sessionID] ?? 0) + 1
+                lastLeaseEpochBySessionID[op.sessionID] = nextEpoch
+                leaseBySessionID[op.sessionID] = ControlLeaseRecord(
+                    sessionID: op.sessionID,
+                    holderUserID: op.holderUserID,
+                    leaseEpoch: nextEpoch,
+                    acquiredAtMillis: record.submittedAtMillis,
+                    expiresAtMillis: record.submittedAtMillis + 30_000
+                )
+            }
         case .releaseControl(let op):
+            guard surfaces.contains(where: { $0.sessionID == op.sessionID }) else {
+                throw RoomActorError.sessionNotAttached(op.sessionID)
+            }
             leaseBySessionID.removeValue(forKey: op.sessionID)
         }
 

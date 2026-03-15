@@ -301,7 +301,11 @@ final class RoomActorTests: XCTestCase {
             profileID: "profile",
             terminalTemplate: nil
         ))))
-        _ = try actor.apply(record(opID: "op-2", payload: .acquireControl(AcquireControlOp(
+        _ = try actor.apply(record(opID: "op-2", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))))
+        _ = try actor.apply(record(opID: "op-3", payload: .acquireControl(AcquireControlOp(
             sessionID: SessionID(rawValue: "session-1"),
             holderUserID: UserID(rawValue: "user-1")
         ))))
@@ -315,15 +319,53 @@ final class RoomActorTests: XCTestCase {
 
         XCTAssertEqual(recovered.controlLease(for: SessionID(rawValue: "session-1"))?.leaseEpoch, 1)
 
-        _ = try recovered.apply(record(opID: "op-3", payload: .releaseControl(ReleaseControlOp(
+        _ = try recovered.apply(record(opID: "op-4", payload: .releaseControl(ReleaseControlOp(
             sessionID: SessionID(rawValue: "session-1")
         ))))
-        _ = try recovered.apply(record(opID: "op-4", payload: .acquireControl(AcquireControlOp(
+        _ = try recovered.apply(record(opID: "op-5", payload: .acquireControl(AcquireControlOp(
             sessionID: SessionID(rawValue: "session-1"),
             holderUserID: UserID(rawValue: "user-2")
         ))))
 
         XCTAssertEqual(recovered.controlLease(for: SessionID(rawValue: "session-1"))?.leaseEpoch, 2)
+    }
+
+    func testCompetingLeaseAcquireIsRejectedWhileCurrentHolderKeepsLease() throws {
+        let actor = makeActor(snapshotInterval: 10)
+
+        _ = try actor.apply(record(opID: "op-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+        _ = try actor.apply(record(opID: "op-2", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))))
+        _ = try actor.apply(record(opID: "op-3", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-1")
+        ))))
+
+        XCTAssertThrowsError(try actor.apply(record(opID: "op-4", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-2")
+        ))))) { error in
+            XCTAssertEqual(
+                error as? RoomActorError,
+                .controlLeaseHeldByAnotherUser(
+                    SessionID(rawValue: "session-1"),
+                    holderUserID: UserID(rawValue: "user-1")
+                )
+            )
+        }
+
+        XCTAssertEqual(actor.controlLease(for: SessionID(rawValue: "session-1"))?.holderUserID, UserID(rawValue: "user-1"))
+        XCTAssertEqual(actor.controlLease(for: SessionID(rawValue: "session-1"))?.leaseEpoch, 1)
     }
 
     func testRecoveryReplaysJournalTailAfterSnapshot() throws {

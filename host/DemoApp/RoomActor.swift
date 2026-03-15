@@ -5,10 +5,12 @@ enum RoomActorError: Error, Equatable, LocalizedError {
     case unknownProfileID(String)
     case surfaceAlreadyExists(TerminalSurfaceID)
     case surfaceNotFound(TerminalSurfaceID)
+    case sessionNotAttached(SessionID)
     case sessionAlreadyAttached(TerminalSurfaceID)
     case sessionAttachedElsewhere(SessionID)
     case noSessionAttached(TerminalSurfaceID)
     case duplicateOpID(RoomOpID)
+    case controlLeaseHeldByAnotherUser(SessionID, holderUserID: UserID)
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +22,8 @@ enum RoomActorError: Error, Equatable, LocalizedError {
             return "surface \(surfaceID.rawValue) already exists"
         case .surfaceNotFound(let surfaceID):
             return "surface \(surfaceID.rawValue) not found"
+        case .sessionNotAttached(let sessionID):
+            return "session \(sessionID.rawValue) is not attached to a surface"
         case .sessionAlreadyAttached(let surfaceID):
             return "surface \(surfaceID.rawValue) already has a session"
         case .sessionAttachedElsewhere(let sessionID):
@@ -28,6 +32,8 @@ enum RoomActorError: Error, Equatable, LocalizedError {
             return "surface \(surfaceID.rawValue) has no session"
         case .duplicateOpID(let opID):
             return "op \(opID.rawValue) already applied"
+        case .controlLeaseHeldByAnotherUser(let sessionID, let holderUserID):
+            return "session \(sessionID.rawValue) is already controlled by \(holderUserID.rawValue)"
         }
     }
 }
@@ -107,6 +113,12 @@ enum RoomStateReducer {
             return index
         }
 
+        func ensureAttachedSession(_ sessionID: SessionID) throws {
+            guard surfaces.contains(where: { $0.sessionID == sessionID }) else {
+                throw RoomActorError.sessionNotAttached(sessionID)
+            }
+        }
+
         switch payload {
         case .createSurface(let op):
             guard snapshot.renderProfileIDs.contains(op.profileID) else {
@@ -175,9 +187,22 @@ enum RoomStateReducer {
             surfaces[index].state = .disconnected
             sideEffects.append(.sessionDetached(surfaceID: op.surfaceID, sessionID: sessionID))
         case .acquireControl(let op):
-            sideEffects.append(.controlAcquired(sessionID: op.sessionID, holderUserID: op.holderUserID))
+            try ensureAttachedSession(op.sessionID)
+            if let existingLease = snapshot.controlLeases.first(where: { $0.sessionID == op.sessionID }) {
+                guard existingLease.holderUserID == op.holderUserID else {
+                    throw RoomActorError.controlLeaseHeldByAnotherUser(
+                        op.sessionID,
+                        holderUserID: existingLease.holderUserID ?? UserID(rawValue: "unknown")
+                    )
+                }
+            } else {
+                sideEffects.append(.controlAcquired(sessionID: op.sessionID, holderUserID: op.holderUserID))
+            }
         case .releaseControl(let op):
-            sideEffects.append(.controlReleased(sessionID: op.sessionID))
+            try ensureAttachedSession(op.sessionID)
+            if snapshot.controlLeases.contains(where: { $0.sessionID == op.sessionID }) {
+                sideEffects.append(.controlReleased(sessionID: op.sessionID))
+            }
         }
 
         let next = DurableRoomSnapshot(

@@ -169,6 +169,64 @@ final class RoomGatewayTests: XCTestCase {
         ])
     }
 
+    func testLeaseChangesBroadcastExplicitEphemeralUpdatesAndRejectCompetingWriters() throws {
+        let fixture = try makeFixture(snapshotInterval: 10)
+        _ = try fixture.gateway.connect(clientID: ClientID(rawValue: "client-1"), knownRoomSeq: nil)
+        _ = try fixture.gateway.connect(clientID: ClientID(rawValue: "client-2"), knownRoomSeq: nil)
+
+        _ = try fixture.gateway.submit(record(opID: "op-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))), from: ClientID(rawValue: "client-1"))
+        _ = try fixture.gateway.submit(record(opID: "op-2", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))), from: ClientID(rawValue: "client-1"))
+        _ = try fixture.gateway.submit(record(opID: "op-3", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-1")
+        ))), from: ClientID(rawValue: "client-1"))
+
+        XCTAssertEqual(
+            fixture.gateway.ephemeralDeliveries(for: ClientID(rawValue: "client-2")),
+            [
+                .leaseUpdated(
+                    SessionID(rawValue: "session-1"),
+                    ControlLeaseRecord(
+                        sessionID: SessionID(rawValue: "session-1"),
+                        holderUserID: UserID(rawValue: "user-1"),
+                        leaseEpoch: 1,
+                        acquiredAtMillis: 100,
+                        expiresAtMillis: 30_100
+                    )
+                )
+            ]
+        )
+
+        XCTAssertThrowsError(try fixture.gateway.submit(record(opID: "op-4", payload: .acquireControl(AcquireControlOp(
+            sessionID: SessionID(rawValue: "session-1"),
+            holderUserID: UserID(rawValue: "user-2")
+        ))), from: ClientID(rawValue: "client-2"))) { error in
+            XCTAssertEqual(
+                error as? RoomGatewayReject,
+                RoomGatewayReject(
+                    roomID: RoomID(rawValue: "room-1"),
+                    clientID: ClientID(rawValue: "client-2"),
+                    opID: RoomOpID(rawValue: "op-4"),
+                    reason: RoomActorError.controlLeaseHeldByAnotherUser(
+                        SessionID(rawValue: "session-1"),
+                        holderUserID: UserID(rawValue: "user-1")
+                    ).localizedDescription
+                )
+            )
+        }
+    }
+
     private func makeFixture(snapshotInterval: UInt64) throws -> (actor: RoomActor, gateway: RoomGateway) {
         let journal = InMemoryRoomJournalStore()
         let snapshots = InMemoryRoomSnapshotStore()

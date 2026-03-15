@@ -46,6 +46,7 @@ enum RoomGatewayDelivery: Equatable {
 enum RoomGatewayEphemeralDelivery: Equatable {
     case presence(String)
     case session(String)
+    case leaseUpdated(SessionID, ControlLeaseRecord?)
 }
 
 enum RoomGatewayError: Error, Equatable, LocalizedError {
@@ -138,6 +139,7 @@ final class RoomGateway {
                 deliveriesByClientID[clientID, default: []].append(.duplicate(applied.record))
             } else {
                 broadcast(.accepted(applied.record))
+                broadcastLeaseUpdates(for: applied.sideEffects)
             }
             return applied
         } catch {
@@ -166,6 +168,17 @@ final class RoomGateway {
 
     func publishSession(_ payload: String) {
         broadcastEphemeral(.session(payload))
+    }
+
+    private func broadcastLeaseUpdates(for sideEffects: [RoomActorSideEffect]) {
+        for sideEffect in sideEffects {
+            switch sideEffect {
+            case .controlAcquired(let sessionID, _), .controlReleased(let sessionID):
+                broadcastEphemeral(.leaseUpdated(sessionID, actor.controlLease(for: sessionID)))
+            case .sessionAttached, .sessionDetached:
+                break
+            }
+        }
     }
 
     private func broadcast(_ delivery: RoomGatewayDelivery) {

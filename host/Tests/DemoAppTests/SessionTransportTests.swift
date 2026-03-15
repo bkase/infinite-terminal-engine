@@ -113,10 +113,8 @@ final class SessionTransportTests: XCTestCase {
         _ = connection.drainMessages()
 
         fixture.currentLeaseEpoch = 4
+        fixture.server.noteLeaseEpochChanged(for: SessionID(rawValue: "session-1"))
 
-        XCTAssertThrowsError(try connection.refreshLeaseState()) { error in
-            XCTAssertEqual(error as? SessionTransportError, .leaseRevoked(currentLeaseEpoch: 4))
-        }
         XCTAssertEqual(
             connection.drainMessages(),
             [

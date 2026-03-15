@@ -128,6 +128,8 @@ final class SessionTransportServer {
     private let leaseEpochProvider: (SessionID) -> UInt64
     private let nowMillis: () -> UInt64
     private var nextConnectionOrdinal: UInt64 = 1
+    private var connectionIDsBySessionID: [SessionID: Set<String>] = [:]
+    private var connectionsByID: [String: SessionTransportConnection] = [:]
 
     init(
         directory: SessionDirectory,
@@ -206,7 +208,7 @@ final class SessionTransportServer {
         }
         logLines.append(contentsOf: pendingMessages.map { Self.describe($0, connectionID: connectionID) })
 
-        return SessionTransportConnection(
+        let connection = SessionTransportConnection(
             connectionID: connectionID,
             session: session,
             clientID: request.clientID,
@@ -216,8 +218,31 @@ final class SessionTransportServer {
             initialPendingMessages: pendingMessages,
             initialDeliveryCount: initialDeliveryCount,
             leaseEpochProvider: leaseEpochProvider,
-            initialLogLines: logLines
+            initialLogLines: logLines,
+            onDisconnect: { [weak self] connectionID, sessionID in
+                self?.removeConnection(connectionID: connectionID, sessionID: sessionID)
+            }
         )
+        connectionsByID[connectionID] = connection
+        connectionIDsBySessionID[request.sessionID, default: []].insert(connectionID)
+        return connection
+    }
+
+    func noteLeaseEpochChanged(for sessionID: SessionID) {
+        for connectionID in connectionIDsBySessionID[sessionID, default: []] {
+            connectionsByID[connectionID]?.noteLeaseEpochChanged()
+        }
+    }
+
+    private func removeConnection(connectionID: String, sessionID: SessionID) {
+        connectionsByID.removeValue(forKey: connectionID)
+        guard var connectionIDs = connectionIDsBySessionID[sessionID] else { return }
+        connectionIDs.remove(connectionID)
+        if connectionIDs.isEmpty {
+            connectionIDsBySessionID.removeValue(forKey: sessionID)
+        } else {
+            connectionIDsBySessionID[sessionID] = connectionIDs
+        }
     }
 
     private static func makeStatusRecord(from state: SessionActorState) -> SessionStatusRecord {
@@ -258,6 +283,7 @@ final class SessionTransportConnection {
     private var didSendLeaseRevoked = false
     private var isDisconnected = false
     private var logLines: [String]
+    private let onDisconnect: (String, SessionID) -> Void
 
     init(
         connectionID: String,
@@ -269,7 +295,8 @@ final class SessionTransportConnection {
         initialPendingMessages: [SessionTransportMessage],
         initialDeliveryCount: Int,
         leaseEpochProvider: @escaping (SessionID) -> UInt64,
-        initialLogLines: [String]
+        initialLogLines: [String],
+        onDisconnect: @escaping (String, SessionID) -> Void
     ) {
         self.connectionID = connectionID
         self.session = session
@@ -281,6 +308,7 @@ final class SessionTransportConnection {
         self.deliveryCount = initialDeliveryCount
         self.leaseEpochProvider = leaseEpochProvider
         self.logLines = initialLogLines
+        self.onDisconnect = onDisconnect
     }
 
     func sendInput(_ frame: SessionTransportInputFrame) throws {
@@ -324,6 +352,7 @@ final class SessionTransportConnection {
         isDisconnected = true
         session.unsubscribe(clientID: clientID)
         logLines.append("connection_id=\(connectionID) disconnected reason=\(reason)")
+        onDisconnect(connectionID, session.sessionID)
     }
 
     func diagnostics() -> SessionTransportDiagnostics {
@@ -337,6 +366,10 @@ final class SessionTransportConnection {
             resumeMode: initialResumeMode,
             logLines: logLines
         )
+    }
+
+    func noteLeaseEpochChanged() {
+        try? refreshLeaseState()
     }
 
     private func syncLiveDeliveries() {
