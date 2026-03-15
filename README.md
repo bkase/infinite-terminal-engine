@@ -10,11 +10,19 @@ Prototype for an Apple Silicon macOS infinite 2D canvas with:
 Verification entrypoints:
 
 - `scripts/install-hooks.sh`
+- `scripts/verify-commit.sh`
+- `scripts/verify-commit-failure.sh [lane]`
+- `scripts/verify-demo.sh`
 - `scripts/stage-engine-header.sh`
 - `scripts/verify-packaging.sh`
 - `zig build doctor`
 - `zig build ci`
-- `scripts/verify-demo.sh`
+
+Fast vs slow lanes:
+
+- Fast lane: `.githooks/pre-commit` runs `scripts/verify-commit.sh` and is the authoritative local/CI commit gate.
+- Slow lane: `scripts/verify-demo.sh` reruns the fast lane, verifies packaging, and performs the release host build.
+- Failure injection: `scripts/verify-commit-failure.sh host-shell` proves the hook rejects representative lane failures with specific output.
 
 Run locally:
 

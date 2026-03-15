@@ -4,6 +4,8 @@ Automated gate:
 
 - `scripts/verify-demo.sh`
 
+The slow lane already includes the authoritative fast lane from `scripts/verify-commit.sh`, packaging verification, and the release Swift host build.
+
 Manual checklist on Apple Silicon:
 
 - Launch the app from a clean checkout with `swift run DemoApp`.
