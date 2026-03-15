@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct ContentView: View {
+struct HostShellView: View {
     @StateObject private var runtime = EngineRuntime()
     @StateObject private var terminalAdapter: GhosttySurfaceAdapter
 
@@ -25,11 +25,18 @@ struct ContentView: View {
         HSplitView {
             ZStack(alignment: .topLeading) {
                 CanvasView(runtime: runtime)
-                Text(runtime.statsSummary)
-                    .font(.system(.caption, design: .monospaced))
-                    .padding(10)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(12)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Spatial Terminal Host")
+                        .font(.headline)
+                    Text(runtime.statsSummary)
+                        .font(.system(.caption, design: .monospaced))
+                    Text("Render shell: DemoApp")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(12)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .padding(12)
                 if let bootError = runtime.bootError {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Render Profile Error")
@@ -45,17 +52,33 @@ struct ContentView: View {
             }
             .frame(minWidth: 520)
 
-            ZStack(alignment: .topLeading) {
-                GhosttyTerminalPane(adapter: terminalAdapter)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(terminalAdapter.title)
-                        .font(.headline)
-                    Text(terminalAdapter.bootError ?? terminalAdapter.status)
-                        .font(.system(.caption, design: .monospaced))
+            VStack(spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    GhosttyTerminalPane(adapter: terminalAdapter)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(terminalAdapter.title)
+                            .font(.headline)
+                        Text(terminalAdapter.bootError ?? terminalAdapter.status)
+                            .font(.system(.caption, design: .monospaced))
+                        Text("texture generation \(terminalAdapter.latestTextureGeneration())")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .padding(12)
                 }
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Host Scaffold")
+                        .font(.headline)
+                    Text("DemoApp is the canonical Step 1 shell and presents embedded Ghostty surfaces through the local adapter contract.")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .padding(12)
+                .background(Color(nsColor: .windowBackgroundColor))
             }
             .frame(minWidth: 380)
         }
@@ -70,7 +93,7 @@ struct DemoApp: App {
             if ProcessInfo.processInfo.environment["ITE_GHOSTTY_SELFTEST"] == "1" {
                 GhosttySurfaceSelfTestView()
             } else {
-                ContentView()
+                HostShellView()
             }
         }
     }
