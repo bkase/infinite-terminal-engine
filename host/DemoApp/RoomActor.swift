@@ -43,6 +43,187 @@ struct AppliedRoomOp: Equatable {
     let wasDuplicate: Bool
 }
 
+enum RoomStateReducer {
+    static func replay(snapshot: DurableRoomSnapshot, records: [RoomOpRecord]) throws -> DurableRoomSnapshot {
+        var currentSnapshot = snapshot
+        var leaseBySessionID = Dictionary(
+            uniqueKeysWithValues: snapshot.controlLeases.map { ($0.sessionID, $0) }
+        )
+        var lastLeaseEpochBySessionID = Dictionary(
+            uniqueKeysWithValues: snapshot.controlLeases.map { ($0.sessionID, $0.leaseEpoch) }
+        )
+
+        for record in records.sorted(by: { ($0.roomSeq ?? 0) < ($1.roomSeq ?? 0) }) {
+            let transition = try applyPayload(
+                record.payload,
+                to: currentSnapshot,
+                submittedAtMillis: record.submittedAtMillis
+            )
+            currentSnapshot = DurableRoomSnapshot(
+                schemaVersion: currentSnapshot.schemaVersion,
+                roomID: currentSnapshot.roomID,
+                roomSeq: record.roomSeq ?? currentSnapshot.roomSeq,
+                renderProfileIDs: transition.snapshot.renderProfileIDs,
+                surfaces: transition.snapshot.surfaces,
+                controlLeases: currentSnapshot.controlLeases
+            )
+            applySideEffects(
+                transition.sideEffects,
+                submittedAtMillis: record.submittedAtMillis,
+                leaseBySessionID: &leaseBySessionID,
+                lastLeaseEpochBySessionID: &lastLeaseEpochBySessionID
+            )
+            currentSnapshot = try refreshSnapshotControlLeases(
+                currentSnapshot,
+                leaseBySessionID: leaseBySessionID
+            )
+        }
+
+        return currentSnapshot
+    }
+
+    static func applyPayload(
+        _ payload: RoomOperationPayload,
+        to snapshot: DurableRoomSnapshot,
+        submittedAtMillis: UInt64
+    ) throws -> (snapshot: DurableRoomSnapshot, sideEffects: [RoomActorSideEffect]) {
+        var surfaces = snapshot.surfaces
+        var sideEffects: [RoomActorSideEffect] = []
+
+        func surfaceIndex(for surfaceID: TerminalSurfaceID) throws -> Int {
+            guard let index = surfaces.firstIndex(where: { $0.id == surfaceID }) else {
+                throw RoomActorError.surfaceNotFound(surfaceID)
+            }
+            return index
+        }
+
+        switch payload {
+        case .createSurface(let op):
+            guard snapshot.renderProfileIDs.contains(op.profileID) else {
+                throw RoomActorError.unknownProfileID(op.profileID)
+            }
+            guard !surfaces.contains(where: { $0.id == op.surfaceID }) else {
+                throw RoomActorError.surfaceAlreadyExists(op.surfaceID)
+            }
+            let surface = DurableRoomSurface(
+                id: op.surfaceID,
+                sessionID: nil,
+                xWorld: op.xWorld,
+                yWorld: op.yWorld,
+                cols: op.cols,
+                rows: op.rows,
+                stackRank: surfaces.count,
+                profileID: op.profileID,
+                title: nil,
+                state: .provisioning,
+                createdBy: UserID(rawValue: "client-generated"),
+                createdAtMillis: submittedAtMillis
+            )
+            surfaces.append(surface)
+        case .moveSurface(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            surfaces[index].xWorld = op.xWorld
+            surfaces[index].yWorld = op.yWorld
+        case .resizeSurface(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            surfaces[index].cols = op.cols
+            surfaces[index].rows = op.rows
+        case .setStackRank(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            let surface = surfaces.remove(at: index)
+            let targetRank = min(max(op.targetRank, 0), surfaces.count)
+            surfaces.insert(surface, at: targetRank)
+            for rank in surfaces.indices {
+                surfaces[rank].stackRank = rank
+            }
+        case .closeSurface(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            surfaces.remove(at: index)
+            for rank in surfaces.indices {
+                surfaces[rank].stackRank = rank
+            }
+        case .setSurfaceTitle(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            surfaces[index].title = op.title
+        case .attachSession(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            guard surfaces[index].sessionID == nil else {
+                throw RoomActorError.sessionAlreadyAttached(op.surfaceID)
+            }
+            surfaces[index].sessionID = op.sessionID
+            surfaces[index].state = .attached
+            sideEffects.append(.sessionAttached(surfaceID: op.surfaceID, sessionID: op.sessionID))
+        case .detachSession(let op):
+            let index = try surfaceIndex(for: op.surfaceID)
+            guard let sessionID = surfaces[index].sessionID else {
+                throw RoomActorError.noSessionAttached(op.surfaceID)
+            }
+            surfaces[index].sessionID = nil
+            surfaces[index].state = .disconnected
+            sideEffects.append(.sessionDetached(surfaceID: op.surfaceID, sessionID: sessionID))
+        case .acquireControl(let op):
+            sideEffects.append(.controlAcquired(sessionID: op.sessionID, holderUserID: op.holderUserID))
+        case .releaseControl(let op):
+            sideEffects.append(.controlReleased(sessionID: op.sessionID))
+        }
+
+        let next = DurableRoomSnapshot(
+            schemaVersion: snapshot.schemaVersion,
+            roomID: snapshot.roomID,
+            roomSeq: snapshot.roomSeq,
+            renderProfileIDs: snapshot.renderProfileIDs,
+            surfaces: surfaces,
+            controlLeases: snapshot.controlLeases
+        )
+        try next.validate()
+        return (snapshot: next, sideEffects: sideEffects)
+    }
+
+    static func applySideEffects(
+        _ sideEffects: [RoomActorSideEffect],
+        submittedAtMillis: UInt64,
+        leaseBySessionID: inout [SessionID: ControlLeaseRecord],
+        lastLeaseEpochBySessionID: inout [SessionID: UInt64]
+    ) {
+        for leaseEffect in sideEffects {
+            switch leaseEffect {
+            case .controlAcquired(let sessionID, let holderUserID):
+                let nextEpoch = (lastLeaseEpochBySessionID[sessionID] ?? 0) + 1
+                lastLeaseEpochBySessionID[sessionID] = nextEpoch
+                leaseBySessionID[sessionID] = ControlLeaseRecord(
+                    sessionID: sessionID,
+                    holderUserID: holderUserID,
+                    leaseEpoch: nextEpoch,
+                    acquiredAtMillis: submittedAtMillis,
+                    expiresAtMillis: submittedAtMillis + 30_000
+                )
+            case .controlReleased(let sessionID):
+                leaseBySessionID.removeValue(forKey: sessionID)
+            case .sessionAttached, .sessionDetached:
+                break
+            }
+        }
+    }
+
+    static func refreshSnapshotControlLeases(
+        _ snapshot: DurableRoomSnapshot,
+        leaseBySessionID: [SessionID: ControlLeaseRecord]
+    ) throws -> DurableRoomSnapshot {
+        let refreshed = DurableRoomSnapshot(
+            schemaVersion: snapshot.schemaVersion,
+            roomID: snapshot.roomID,
+            roomSeq: snapshot.roomSeq,
+            renderProfileIDs: snapshot.renderProfileIDs,
+            surfaces: snapshot.surfaces,
+            controlLeases: leaseBySessionID.values.sorted { lhs, rhs in
+                lhs.sessionID.rawValue < rhs.sessionID.rawValue
+            }
+        )
+        try refreshed.validate()
+        return refreshed
+    }
+}
+
 protocol RoomJournalStore {
     func append(_ record: RoomOpRecord) throws
     func records(for roomID: RoomID, after roomSeq: UInt64) throws -> [RoomOpRecord]
@@ -189,7 +370,11 @@ final class RoomActor {
     }
 
     private func applyRecord(_ record: RoomOpRecord, to snapshot: DurableRoomSnapshot) throws -> AppliedRoomOp {
-        let nextSnapshot = try Self.apply(record.payload, to: snapshot, submittedAtMillis: record.submittedAtMillis)
+        let nextSnapshot = try RoomStateReducer.applyPayload(
+            record.payload,
+            to: snapshot,
+            submittedAtMillis: record.submittedAtMillis
+        )
         let sequencedSnapshot = DurableRoomSnapshot(
             schemaVersion: snapshot.schemaVersion,
             roomID: snapshot.roomID,
@@ -208,121 +393,12 @@ final class RoomActor {
     }
 
     private func applySideEffects(_ sideEffects: [RoomActorSideEffect], submittedAtMillis: UInt64) {
-        for leaseEffect in sideEffects {
-            switch leaseEffect {
-            case .controlAcquired(let sessionID, let holderUserID):
-                let nextEpoch = (lastLeaseEpochBySessionID[sessionID] ?? 0) + 1
-                lastLeaseEpochBySessionID[sessionID] = nextEpoch
-                leaseBySessionID[sessionID] = ControlLeaseRecord(
-                    sessionID: sessionID,
-                    holderUserID: holderUserID,
-                    leaseEpoch: nextEpoch,
-                    acquiredAtMillis: submittedAtMillis,
-                    expiresAtMillis: submittedAtMillis + 30_000
-                )
-            case .controlReleased(let sessionID):
-                leaseBySessionID.removeValue(forKey: sessionID)
-            case .sessionAttached, .sessionDetached:
-                break
-            }
-        }
-    }
-
-    private static func apply(
-        _ payload: RoomOperationPayload,
-        to snapshot: DurableRoomSnapshot,
-        submittedAtMillis: UInt64
-    ) throws -> (snapshot: DurableRoomSnapshot, sideEffects: [RoomActorSideEffect]) {
-        var surfaces = snapshot.surfaces
-        var sideEffects: [RoomActorSideEffect] = []
-
-        func surfaceIndex(for surfaceID: TerminalSurfaceID) throws -> Int {
-            guard let index = surfaces.firstIndex(where: { $0.id == surfaceID }) else {
-                throw RoomActorError.surfaceNotFound(surfaceID)
-            }
-            return index
-        }
-
-        switch payload {
-        case .createSurface(let op):
-            guard snapshot.renderProfileIDs.contains(op.profileID) else {
-                throw RoomActorError.unknownProfileID(op.profileID)
-            }
-            guard !surfaces.contains(where: { $0.id == op.surfaceID }) else {
-                throw RoomActorError.surfaceAlreadyExists(op.surfaceID)
-            }
-            let surface = DurableRoomSurface(
-                id: op.surfaceID,
-                sessionID: nil,
-                xWorld: op.xWorld,
-                yWorld: op.yWorld,
-                cols: op.cols,
-                rows: op.rows,
-                stackRank: surfaces.count,
-                profileID: op.profileID,
-                title: nil,
-                state: .provisioning,
-                createdBy: UserID(rawValue: "client-generated"),
-                createdAtMillis: submittedAtMillis
-            )
-            surfaces.append(surface)
-        case .moveSurface(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            surfaces[index].xWorld = op.xWorld
-            surfaces[index].yWorld = op.yWorld
-        case .resizeSurface(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            surfaces[index].cols = op.cols
-            surfaces[index].rows = op.rows
-        case .setStackRank(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            let surface = surfaces.remove(at: index)
-            let targetRank = min(max(op.targetRank, 0), surfaces.count)
-            surfaces.insert(surface, at: targetRank)
-            for rank in surfaces.indices {
-                surfaces[rank].stackRank = rank
-            }
-        case .closeSurface(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            surfaces.remove(at: index)
-            for rank in surfaces.indices {
-                surfaces[rank].stackRank = rank
-            }
-        case .setSurfaceTitle(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            surfaces[index].title = op.title
-        case .attachSession(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            guard surfaces[index].sessionID == nil else {
-                throw RoomActorError.sessionAlreadyAttached(op.surfaceID)
-            }
-            surfaces[index].sessionID = op.sessionID
-            surfaces[index].state = .attached
-            sideEffects.append(.sessionAttached(surfaceID: op.surfaceID, sessionID: op.sessionID))
-        case .detachSession(let op):
-            let index = try surfaceIndex(for: op.surfaceID)
-            guard let sessionID = surfaces[index].sessionID else {
-                throw RoomActorError.noSessionAttached(op.surfaceID)
-            }
-            surfaces[index].sessionID = nil
-            surfaces[index].state = .disconnected
-            sideEffects.append(.sessionDetached(surfaceID: op.surfaceID, sessionID: sessionID))
-        case .acquireControl(let op):
-            sideEffects.append(.controlAcquired(sessionID: op.sessionID, holderUserID: op.holderUserID))
-        case .releaseControl(let op):
-            sideEffects.append(.controlReleased(sessionID: op.sessionID))
-        }
-
-        let next = DurableRoomSnapshot(
-            schemaVersion: snapshot.schemaVersion,
-            roomID: snapshot.roomID,
-            roomSeq: snapshot.roomSeq,
-            renderProfileIDs: snapshot.renderProfileIDs,
-            surfaces: surfaces,
-            controlLeases: snapshot.controlLeases
+        RoomStateReducer.applySideEffects(
+            sideEffects,
+            submittedAtMillis: submittedAtMillis,
+            leaseBySessionID: &leaseBySessionID,
+            lastLeaseEpochBySessionID: &lastLeaseEpochBySessionID
         )
-        try next.validate()
-        return (snapshot: next, sideEffects: sideEffects)
     }
 
     private static func checksum(for snapshot: DurableRoomSnapshot) throws -> String {
@@ -340,16 +416,9 @@ final class RoomActor {
     }
 
     private func refreshSnapshotControlLeases() throws {
-        snapshot = DurableRoomSnapshot(
-            schemaVersion: snapshot.schemaVersion,
-            roomID: snapshot.roomID,
-            roomSeq: snapshot.roomSeq,
-            renderProfileIDs: snapshot.renderProfileIDs,
-            surfaces: snapshot.surfaces,
-            controlLeases: leaseBySessionID.values.sorted { lhs, rhs in
-                lhs.sessionID.rawValue < rhs.sessionID.rawValue
-            }
+        snapshot = try RoomStateReducer.refreshSnapshotControlLeases(
+            snapshot,
+            leaseBySessionID: leaseBySessionID
         )
-        try snapshot.validate()
     }
 }
