@@ -7,6 +7,8 @@
 Each subscribed terminal session gets its own transport connection. The transport stays session-local and thin:
 
 - authenticate a scoped session token
+- bound token lifetime to a short server-side maximum
+- require active room membership before subscribe or input
 - validate the current lease epoch
 - emit bootstrap or reconnect replay output
 - continue streaming live output and status changes
@@ -46,12 +48,21 @@ Each connection produces deterministic log lines with:
 - resume mode (`bootstrap`, `replay`, or `staleAnchorBootstrap`)
 - per-message summaries for bootstrap, output, status, lease revocation, and client input
 
+Security-sensitive transport decisions also emit structured `security`-domain logs through `Observability`:
+
+- `session_subscribe_denied` for membership, token, or lease-policy failures
+- `input_denied` when input is rejected after membership or lease changes
+- `paste_forwarded` when bracketed paste crosses the session transport boundary
+
+These logs retain `decision`, `session_id`, `client_id`, and denial/audit fields so policy failures stay distinguishable from infrastructure failures in retained artifacts.
+
 ## Verification
 
 ```bash
 ./scripts/test-session-transport.sh
 ./scripts/check-session-transport.sh
 ./scripts/check-session-client.sh
+./scripts/check-session-security.sh
 ```
 
-Coverage includes token success/failure, bootstrap ordering, reconnect replay, stale-anchor fallback, lease-revocation delivery, and client-side bootstrap/live/reconnect/failure overlay handling.
+Coverage includes token success/failure, bounded token lifetime, room-membership denial, membership-change invalidation, bootstrap ordering, reconnect replay, stale-anchor fallback, lease-revocation delivery, paste audit logging, and client-side bootstrap/live/reconnect/failure overlay handling.
