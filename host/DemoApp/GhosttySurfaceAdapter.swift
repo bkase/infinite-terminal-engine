@@ -98,6 +98,7 @@ final class GhosttySurfaceAdapter: ObservableObject {
     private weak var hostView: NSView?
     private var lastPixelSize: CGSize = .zero
     private let textureDevice = MTLCreateSystemDefaultDevice()
+    private lazy var texturePublisher = TerminalTexturePublisher(device: textureDevice)
 
     init(
         profile: RenderProfile,
@@ -143,12 +144,14 @@ final class GhosttySurfaceAdapter: ObservableObject {
         ghostty_surface_refresh(surface)
         ghostty_surface_draw(surface)
         tick()
+        publishLatestSurfaceTexture()
     }
 
     func tick() {
         guard let app else { return }
         ghostty_app_tick(app)
         status = bootError == nil ? "running" : "failed"
+        publishLatestSurfaceTexture()
     }
 
     func ingestOutput(_ text: String) {
@@ -284,6 +287,19 @@ final class GhosttySurfaceAdapter: ObservableObject {
     }
 
     func latestFrontTexture() -> MTLTexture? {
+        texturePublisher?.latestFrontTexture
+    }
+
+    func latestTextureGeneration() -> UInt64 {
+        texturePublisher?.latestGeneration ?? 0
+    }
+
+    private func publishLatestSurfaceTexture() {
+        guard let sourceTexture = makeLiveSurfaceTexture() else { return }
+        texturePublisher?.publishSnapshot(from: sourceTexture)
+    }
+
+    private func makeLiveSurfaceTexture() -> MTLTexture? {
         guard
             let hostView,
             let layer = hostView.layer,

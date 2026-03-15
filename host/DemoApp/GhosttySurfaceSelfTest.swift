@@ -76,9 +76,13 @@ final class GhosttySurfaceSelfTestDriver: ObservableObject {
             return text.contains("selftest-visible-alpha") && text.contains("selftest-visible-beta")
         }
 
-        let resizedTexture = try await expectTexture("surface never produced a resized texture")
-        guard resizedTexture.width != initialTexture.width || resizedTexture.height != initialTexture.height else {
-            throw GhosttySurfaceSelfTestError.missingTexture("texture size did not change after resize")
+        try await expect("surface never produced a resized texture") {
+            guard let texture = self.adapter.latestFrontTexture() else { return false }
+            return texture.width != initialTexture.width || texture.height != initialTexture.height
+        }
+
+        guard adapter.latestFrontTexture() != nil else {
+            throw GhosttySurfaceSelfTestError.missingTexture("surface lost its published front texture after resize")
         }
     }
 
