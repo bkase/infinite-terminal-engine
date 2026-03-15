@@ -17,6 +17,8 @@ final class EngineRuntime: ObservableObject {
     @Published var bootError: String?
 
     let renderProfileID: String
+    private(set) var surfaces = SurfaceStore()
+    private var profilesByID: [String: RenderProfile] = [:]
 
     private let bindings = EngineBindings.shared
     nonisolated(unsafe) private var engine: OpaquePointer?
@@ -34,6 +36,7 @@ final class EngineRuntime: ObservableObject {
         }
 
         renderProfileID = renderProfile.id
+        profilesByID = [renderProfile.id: renderProfile]
         var handle: OpaquePointer?
         var config = ite_EngineConfig(
             abi_version: bindings.headerVersion(),
@@ -46,7 +49,8 @@ final class EngineRuntime: ObservableObject {
         )
         precondition(bindings.create(&handle, &config) == ite_EngineStatus_ok)
         engine = handle
-        replaceRects(Self.demoRects)
+        surfaces.replaceAll(with: Self.demoSurfaces(profileID: renderProfile.id))
+        syncSceneRects()
     }
 
     deinit {
@@ -78,6 +82,11 @@ final class EngineRuntime: ObservableObject {
         _ = payloads.withUnsafeMutableBufferPointer { buffer in
             bindings.replaceRects(engine, buffer.baseAddress!, buffer.count)
         }
+    }
+
+    func replaceSurfaces(_ surfaces: [TerminalSurface]) {
+        self.surfaces.replaceAll(with: surfaces)
+        syncSceneRects()
     }
 
     func resize(width: Int, height: Int) {
@@ -116,20 +125,78 @@ final class EngineRuntime: ObservableObject {
         guard let engine else { return }
         var stats = ite_FrameStats()
         _ = bindings.getStats(engine, &stats)
-        statsSummary = "\(stats.visible_rects) / \(stats.total_rects) visible • \(renderProfileID)"
+        statsSummary = "\(stats.visible_rects) / \(stats.total_rects) visible • \(surfaces.count) surfaces • \(renderProfileID)"
     }
 
-    static let demoRects: [CanvasRect] = stride(from: 0, to: 12, by: 1).flatMap { row in
-        stride(from: 0, to: 12, by: 1).map { col in
-            let red = UInt32((row * 19) & 0xff)
-            let green = UInt32((col * 17) & 0xff)
-            return CanvasRect(
-                x: Float(col * 48),
-                y: Float(row * 40),
-                w: 36,
-                h: 28,
-                color: (red << 24) | (green << 16) | 0x55ff
+    private func syncSceneRects(backingScale: CGFloat = 1) {
+        let sceneRects = surfaces.orderedSurfaceIDs().compactMap { id -> [CanvasRect]? in
+            guard let geometry = surfaces.geometry(for: id, profilesByID: profilesByID, backingScale: backingScale),
+                let surface = surfaces.surface(id: id)
+            else {
+                return nil
+            }
+
+            let bodyColor: UInt32 = surface.flags.contains(.focused) ? 0x233a50ff : 0x1b2534ff
+            let titleColor: UInt32 = surface.flags.contains(.focused) ? 0x4d9de0ff : 0x31445dff
+            let borderInset: Float = 1
+            let bodyRect = CanvasRect(
+                x: Float(geometry.frame.minX),
+                y: Float(geometry.frame.minY),
+                w: Float(geometry.frame.width),
+                h: Float(geometry.frame.height),
+                color: bodyColor
             )
+            let titleRect = CanvasRect(
+                x: Float(geometry.titlebarFrame.minX),
+                y: Float(geometry.titlebarFrame.minY),
+                w: Float(geometry.titlebarFrame.width),
+                h: Float(geometry.titlebarFrame.height),
+                color: titleColor
+            )
+            let contentRect = CanvasRect(
+                x: Float(geometry.contentFrame.minX - CGFloat(borderInset)),
+                y: Float(geometry.contentFrame.minY - CGFloat(borderInset)),
+                w: Float(geometry.contentFrame.width + CGFloat(borderInset * 2)),
+                h: Float(geometry.contentFrame.height + CGFloat(borderInset * 2)),
+                color: 0x0f1722ff
+            )
+            return [bodyRect, titleRect, contentRect]
         }
+        replaceRects(sceneRects.flatMap { $0 })
+    }
+
+    static func demoSurfaces(profileID: String) -> [TerminalSurface] {
+        [
+            TerminalSurface(
+                id: TerminalSurfaceID("surface-alpha"),
+                sessionID: "session-alpha",
+                origin: CGPoint(x: 56, y: 52),
+                cols: 80,
+                rows: 24,
+                profileID: profileID,
+                stackRank: 0,
+                flags: [.focused, .acceptsInput]
+            ),
+            TerminalSurface(
+                id: TerminalSurfaceID("surface-beta"),
+                sessionID: "session-beta",
+                origin: CGPoint(x: 220, y: 180),
+                cols: 72,
+                rows: 20,
+                profileID: profileID,
+                stackRank: 1,
+                flags: [.acceptsInput]
+            ),
+            TerminalSurface(
+                id: TerminalSurfaceID("surface-gamma"),
+                sessionID: "session-gamma",
+                origin: CGPoint(x: 470, y: 88),
+                cols: 64,
+                rows: 18,
+                profileID: profileID,
+                stackRank: 2,
+                flags: [.acceptsInput]
+            ),
+        ]
     }
 }

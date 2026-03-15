@@ -19,12 +19,17 @@ struct RenderProfile: Decodable, Identifiable {
     let boldFontFile: String
     let italicFontFile: String
 
-    func surfacePixelSize(cols: Int, rows: Int, backingScale: CGFloat) -> CGSize {
+    func surfaceLogicalSize(cols: Int, rows: Int) -> CGSize {
         let logicalWidth = CGFloat(cols) * cellWidth + (paddingX * 2)
         let logicalHeight = CGFloat(rows) * lineHeight + (paddingY * 2) + titlebarHeight
+        return CGSize(width: logicalWidth, height: logicalHeight)
+    }
+
+    func surfacePixelSize(cols: Int, rows: Int, backingScale: CGFloat) -> CGSize {
+        let logicalSize = surfaceLogicalSize(cols: cols, rows: rows)
         return CGSize(
-            width: ceil(logicalWidth * backingScale),
-            height: ceil(logicalHeight * backingScale)
+            width: ceil(logicalSize.width * backingScale),
+            height: ceil(logicalSize.height * backingScale)
         )
     }
 
