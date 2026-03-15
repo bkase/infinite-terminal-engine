@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
     const integration_cmd = [_][]const u8{"scripts/test-integration-cpu.sh"};
     const gpu_cmd = [_][]const u8{"scripts/test-gpu.sh"};
     const host_cmd = [_][]const u8{"scripts/build-host.sh"};
+    const ghostty_wrapper_cmd = [_][]const u8{"scripts/test-ghostty-wrapper.sh"};
     const ci_cmd = [_][]const u8{"scripts/verify-commit.sh"};
 
     _ = addShellStep(b, "doctor", "Validate pinned toolchain and required Apple tools", &doctor_cmd);
@@ -38,5 +39,6 @@ pub fn build(b: *std.Build) void {
     gpu.dependOn(shader);
     const host = addShellStep(b, "host", "Build the macOS host app", &host_cmd);
     host.dependOn(shader);
+    _ = addShellStep(b, "test-ghostty-wrapper", "Run the pinned Ghostty wrapper compatibility checks", &ghostty_wrapper_cmd);
     _ = addShellStep(b, "ci", "Run the canonical commit verification suite", &ci_cmd);
 }

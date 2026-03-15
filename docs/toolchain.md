@@ -22,13 +22,17 @@ Fast lane coverage:
 - `compositor-cpu`: `zig build test-integration-cpu`
 - `compositor-gpu`: `zig build test-gpu`
 - `host-shell`: `zig build host`
-- `ghostty-wrapper`: `scripts/test-ghostty-wrapper.sh` when that bead lands
+- `ghostty-wrapper`: `scripts/test-ghostty-wrapper.sh`
 - `room`: `scripts/test-room.sh` when that bead lands
 - `multiplayer`: `scripts/test-multiplayer.sh` when that bead lands
 
 Failure injection:
 
 - `scripts/verify-commit-failure.sh host-shell` forces the named lane to fail so the hook behavior stays testable.
+
+Ghostty vendor pinning:
+
+- `docs/ghostty-vendor.md` records the vendored Ghostty snapshot and the allowed wrapper boundary.
 
 Shader staging contract:
 
