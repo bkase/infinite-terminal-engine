@@ -79,6 +79,8 @@ enum RoomSchemaValidationError: Error, Equatable, LocalizedError {
     case negativeStackRank
     case duplicateSurfaceID(TerminalSurfaceID)
     case duplicateStackRank(Int)
+    case nonDenseStackRank(expected: Int, actual: Int)
+    case duplicateSessionAttachment(SessionID)
     case missingSessionForAttachedSurface(TerminalSurfaceID)
     case leaseMissingHolder
     case leaseExpirationNotAfterAcquired
@@ -95,6 +97,10 @@ enum RoomSchemaValidationError: Error, Equatable, LocalizedError {
             return "duplicate surface_id \(surfaceID.rawValue)"
         case .duplicateStackRank(let rank):
             return "duplicate stack_rank \(rank)"
+        case .nonDenseStackRank(let expected, let actual):
+            return "expected dense stack_rank \(expected) but found \(actual)"
+        case .duplicateSessionAttachment(let sessionID):
+            return "session_id \(sessionID.rawValue) is attached more than once"
         case .missingSessionForAttachedSurface(let surfaceID):
             return "attached surface \(surfaceID.rawValue) requires session_id"
         case .leaseMissingHolder:
@@ -159,6 +165,7 @@ struct DurableRoomSnapshot: Codable, Equatable {
 
         var surfaceIDs = Set<TerminalSurfaceID>()
         var stackRanks = Set<Int>()
+        var attachedSessionIDs = Set<SessionID>()
         for surface in surfaces {
             try surface.validate()
             if !surfaceIDs.insert(surface.id).inserted {
@@ -166,6 +173,19 @@ struct DurableRoomSnapshot: Codable, Equatable {
             }
             if !stackRanks.insert(surface.stackRank).inserted {
                 throw RoomSchemaValidationError.duplicateStackRank(surface.stackRank)
+            }
+            if let sessionID = surface.sessionID,
+               !attachedSessionIDs.insert(sessionID).inserted
+            {
+                throw RoomSchemaValidationError.duplicateSessionAttachment(sessionID)
+            }
+        }
+        for (index, surface) in surfaces.enumerated() {
+            if surface.stackRank != index {
+                throw RoomSchemaValidationError.nonDenseStackRank(
+                    expected: index,
+                    actual: surface.stackRank
+                )
             }
         }
         for lease in controlLeases {

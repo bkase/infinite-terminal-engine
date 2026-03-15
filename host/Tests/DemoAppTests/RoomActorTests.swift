@@ -136,6 +136,42 @@ final class RoomActorTests: XCTestCase {
         }
     }
 
+    func testAttachSessionRejectsSessionAlreadyAttachedElsewhere() throws {
+        let actor = makeActor()
+        _ = try actor.apply(record(opID: "create-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+        _ = try actor.apply(record(opID: "create-2", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-2"),
+            xWorld: 20,
+            yWorld: 20,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+        _ = try actor.apply(record(opID: "attach-1", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))))
+
+        XCTAssertThrowsError(try actor.apply(record(opID: "attach-2", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-2"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))))) { error in
+            XCTAssertEqual(
+                error as? RoomActorError,
+                .sessionAttachedElsewhere(SessionID(rawValue: "session-1"))
+            )
+        }
+    }
+
     func testRoomSeqIsMonotonicAcrossAcceptedOps() throws {
         let journal = InMemoryRoomJournalStore()
         let snapshots = InMemoryRoomSnapshotStore()

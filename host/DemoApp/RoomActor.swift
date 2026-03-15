@@ -6,6 +6,7 @@ enum RoomActorError: Error, Equatable, LocalizedError {
     case surfaceAlreadyExists(TerminalSurfaceID)
     case surfaceNotFound(TerminalSurfaceID)
     case sessionAlreadyAttached(TerminalSurfaceID)
+    case sessionAttachedElsewhere(SessionID)
     case noSessionAttached(TerminalSurfaceID)
     case duplicateOpID(RoomOpID)
 
@@ -21,6 +22,8 @@ enum RoomActorError: Error, Equatable, LocalizedError {
             return "surface \(surfaceID.rawValue) not found"
         case .sessionAlreadyAttached(let surfaceID):
             return "surface \(surfaceID.rawValue) already has a session"
+        case .sessionAttachedElsewhere(let sessionID):
+            return "session \(sessionID.rawValue) is already attached to another surface"
         case .noSessionAttached(let surfaceID):
             return "surface \(surfaceID.rawValue) has no session"
         case .duplicateOpID(let opID):
@@ -149,6 +152,9 @@ enum RoomStateReducer {
             let index = try surfaceIndex(for: op.surfaceID)
             guard surfaces[index].sessionID == nil else {
                 throw RoomActorError.sessionAlreadyAttached(op.surfaceID)
+            }
+            guard !surfaces.contains(where: { $0.sessionID == op.sessionID }) else {
+                throw RoomActorError.sessionAttachedElsewhere(op.sessionID)
             }
             surfaces[index].sessionID = op.sessionID
             surfaces[index].state = .attached

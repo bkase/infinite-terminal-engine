@@ -179,6 +179,93 @@ final class RoomSchemaTests: XCTestCase {
         }
     }
 
+    func testSnapshotValidationRejectsNonDenseRanksAndDuplicateSessionAttachments() {
+        let nonDenseRanks = DurableRoomSnapshot(
+            schemaVersion: .v1,
+            roomID: RoomID(rawValue: "room-1"),
+            roomSeq: 2,
+            renderProfileIDs: ["profile"],
+            surfaces: [
+                DurableRoomSurface(
+                    id: TerminalSurfaceID(rawValue: "surface-1"),
+                    sessionID: SessionID(rawValue: "session-1"),
+                    xWorld: 0,
+                    yWorld: 0,
+                    cols: 80,
+                    rows: 24,
+                    stackRank: 0,
+                    profileID: "profile",
+                    title: nil,
+                    state: .attached,
+                    createdBy: UserID(rawValue: "user-1"),
+                    createdAtMillis: 1
+                ),
+                DurableRoomSurface(
+                    id: TerminalSurfaceID(rawValue: "surface-2"),
+                    sessionID: SessionID(rawValue: "session-2"),
+                    xWorld: 20,
+                    yWorld: 20,
+                    cols: 80,
+                    rows: 24,
+                    stackRank: 2,
+                    profileID: "profile",
+                    title: nil,
+                    state: .attached,
+                    createdBy: UserID(rawValue: "user-2"),
+                    createdAtMillis: 2
+                ),
+            ],
+            controlLeases: []
+        )
+        let duplicateSessions = DurableRoomSnapshot(
+            schemaVersion: .v1,
+            roomID: RoomID(rawValue: "room-1"),
+            roomSeq: 2,
+            renderProfileIDs: ["profile"],
+            surfaces: [
+                DurableRoomSurface(
+                    id: TerminalSurfaceID(rawValue: "surface-1"),
+                    sessionID: SessionID(rawValue: "session-1"),
+                    xWorld: 0,
+                    yWorld: 0,
+                    cols: 80,
+                    rows: 24,
+                    stackRank: 0,
+                    profileID: "profile",
+                    title: nil,
+                    state: .attached,
+                    createdBy: UserID(rawValue: "user-1"),
+                    createdAtMillis: 1
+                ),
+                DurableRoomSurface(
+                    id: TerminalSurfaceID(rawValue: "surface-2"),
+                    sessionID: SessionID(rawValue: "session-1"),
+                    xWorld: 20,
+                    yWorld: 20,
+                    cols: 80,
+                    rows: 24,
+                    stackRank: 1,
+                    profileID: "profile",
+                    title: nil,
+                    state: .attached,
+                    createdBy: UserID(rawValue: "user-2"),
+                    createdAtMillis: 2
+                ),
+            ],
+            controlLeases: []
+        )
+
+        XCTAssertThrowsError(try nonDenseRanks.validate()) { error in
+            XCTAssertEqual(error as? RoomSchemaValidationError, .nonDenseStackRank(expected: 1, actual: 2))
+        }
+        XCTAssertThrowsError(try duplicateSessions.validate()) { error in
+            XCTAssertEqual(
+                error as? RoomSchemaValidationError,
+                .duplicateSessionAttachment(SessionID(rawValue: "session-1"))
+            )
+        }
+    }
+
     func testPersistenceRecordsRoundTripAndValidate() throws {
         let leaseRecord = ControlLeaseRecord(
             sessionID: SessionID(rawValue: "session-1"),
