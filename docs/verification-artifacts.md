@@ -25,6 +25,15 @@ The canonical files are:
 - `summaries/summary.json`: rolled-up pass/fail counters copied from `manifest.json`
 - `failures/*.log`: human-readable retained debugging notes for failures or injected faults
 
+Replay-capable bundles may also retain canonical payload files under `replay/`:
+
+- `room_snapshot`: JSON `DurableRoomSnapshot` used as the room replay base
+- `room_journal`: JSON array of `RoomOpRecord` values applied after the base snapshot
+- `room_expected_snapshot`: JSON `DurableRoomSnapshot` used by offline replay diff mode
+- `session_bootstrap`: JSON bootstrap payload with retained redraw bytes
+- `session_output`: JSON array of ordered output chunks with byte payloads
+- `session_expected_output`: JSON expected replay output used by offline replay diff mode
+
 Bundle paths must stay relative, deterministic, and safe to archive. Producers must not emit absolute paths or `..` segments.
 
 ## Scenario naming
@@ -101,6 +110,8 @@ Use the shared tool for future harnesses:
 ```bash
 python3 ./scripts/verification-artifact-tool.py validate path/to/manifest.json
 python3 ./scripts/verification-artifact-tool.py smoke /tmp/ite-artifacts
+python3 ./scripts/replay-artifact-tool.py room path/to/manifest.json --check
+python3 ./scripts/replay-artifact-tool.py session path/to/manifest.json --check
 ```
 
 The smoke command emits a deterministic sample bundle that covers room, session, client, Ghostty, compositor, and security events plus reconnect and security-denial faults.

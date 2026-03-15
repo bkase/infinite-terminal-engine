@@ -211,7 +211,8 @@ final class MultiplayerAcceptanceTests: XCTestCase {
                 "room-replica.log": replica.timeline.joined(separator: "\n") + "\n",
                 "viewer-1.log": viewer.logLines(surfaceID: surfaceID).joined(separator: "\n") + "\n",
                 "backend.log": fixture.backend(sessionID).transcriptLines().joined(separator: "\n") + "\n",
-            ]
+            ],
+            extraFiles: try fixture.roomReplayFiles()
         )
     }
 
@@ -276,7 +277,8 @@ final class MultiplayerAcceptanceTests: XCTestCase {
                 "session-initial.log": initial.diagnostics().logLines.joined(separator: "\n") + "\n",
                 "session-reconnect.log": replay.diagnostics().logLines.joined(separator: "\n") + "\n",
                 "backend.log": fixture.backend(sessionID).transcriptLines().joined(separator: "\n") + "\n",
-            ]
+            ],
+            extraFiles: try fixture.sessionReplayFiles(sessionID: sessionID)
         )
     }
 
@@ -340,7 +342,8 @@ final class MultiplayerAcceptanceTests: XCTestCase {
         runID: String,
         faults: [[String: Any]],
         events: [[String: Any]],
-        logs: [String: String]
+        logs: [String: String],
+        extraFiles: [MultiplayerArtifactFile] = []
     ) throws {
         guard let root = ProcessInfo.processInfo.environment["ITE_MULTIPLAYER_ARTIFACT_ROOT"], !root.isEmpty else {
             return
@@ -351,7 +354,8 @@ final class MultiplayerAcceptanceTests: XCTestCase {
             runID: runID,
             faults: faults,
             events: events,
-            logs: logs
+            logs: logs,
+            extraFiles: extraFiles
         )
     }
 }
@@ -364,6 +368,8 @@ private final class MultiplayerAcceptanceFixture {
     let server: SessionTransportServer
     let authenticator: SessionTransportAuthenticator
     let coordinator: SurfaceLifecycleCoordinator
+    let journalStore: InMemoryRoomJournalStore
+    let snapshotStore: InMemoryRoomSnapshotStore
 
     private let backends: MutableBox<[SessionID: ReplayLogPTYBackend]>
     private let leaseEpochs: MutableBox<[SessionID: UInt64]>
@@ -413,6 +419,8 @@ private final class MultiplayerAcceptanceFixture {
         self.server = server
         self.authenticator = authenticator
         self.coordinator = coordinator
+        self.journalStore = journal
+        self.snapshotStore = snapshots
         self.backends = backends
         self.leaseEpochs = leaseEpochs
     }
@@ -528,6 +536,92 @@ private final class MultiplayerAcceptanceFixture {
     func backend(_ sessionID: SessionID) -> ReplayLogPTYBackend {
         backends.value[sessionID]!
     }
+
+    func roomReplayFiles(
+        roomID: RoomID = RoomID(rawValue: "room-1"),
+        labelPrefix: String = "room reconnect"
+    ) throws -> [MultiplayerArtifactFile] {
+        let baseSnapshot = try snapshotStore.latestSnapshot(for: roomID)?.snapshot ?? actor.snapshot
+        let tailRecords = try journalStore.records(for: roomID, after: baseSnapshot.roomSeq)
+
+        return [
+            try MultiplayerArtifactFile.json(
+                kind: "room_snapshot",
+                label: "\(labelPrefix) base snapshot",
+                relativePath: "replay/room/base-snapshot.json",
+                encodable: baseSnapshot
+            ),
+            try MultiplayerArtifactFile.json(
+                kind: "room_journal",
+                label: "\(labelPrefix) journal tail",
+                relativePath: "replay/room/journal.json",
+                encodable: tailRecords
+            ),
+            try MultiplayerArtifactFile.json(
+                kind: "room_expected_snapshot",
+                label: "\(labelPrefix) expected snapshot",
+                relativePath: "replay/room/expected-snapshot.json",
+                encodable: actor.snapshot
+            ),
+        ]
+    }
+
+    func sessionReplayFiles(
+        sessionID: SessionID,
+        labelPrefix: String = "session reconnect"
+    ) throws -> [MultiplayerArtifactFile] {
+        guard let session = sessionDirectory.session(for: sessionID) else {
+            throw NSError(domain: "MultiplayerAcceptanceFixture", code: 1)
+        }
+
+        let bootstrap = try session.subscribe(clientID: ClientID(rawValue: "replay-audit"))
+        let bootstrapBytes = bootstrap.bytes
+        let bootstrapStart = Int(bootstrap.outputSeqStart)
+        let bootstrapEnd = Int(bootstrap.outputSeqEnd)
+        let replayChunks = session.outputChunks(after: bootstrap.outputSeqAnchor)
+        let expectedBytes = bootstrapBytes + replayChunks.flatMap(\.bytes)
+        let bootstrapPayload: [String: Any] = [
+            "session_id": sessionID.rawValue,
+            "output_seq_start": bootstrapStart,
+            "output_seq_end": bootstrapEnd,
+            "bytes_utf8": String(decoding: bootstrapBytes, as: UTF8.self),
+            "bytes_base64": Data(bootstrapBytes).base64EncodedString(),
+        ]
+        let chunkPayloads = replayChunks.map { chunk in
+            [
+                "seq_start": Int(chunk.seqStart),
+                "seq_end": Int(chunk.seqEnd),
+                "bytes_utf8": String(decoding: chunk.bytes, as: UTF8.self),
+                "bytes_base64": Data(chunk.bytes).base64EncodedString(),
+            ]
+        }
+        let expectedPayload: [String: Any] = [
+            "session_id": sessionID.rawValue,
+            "bytes_utf8": String(decoding: expectedBytes, as: UTF8.self),
+            "bytes_base64": Data(expectedBytes).base64EncodedString(),
+        ]
+
+        return [
+            try MultiplayerArtifactFile.jsonObject(
+                kind: "session_bootstrap",
+                label: "\(labelPrefix) bootstrap",
+                relativePath: "replay/session/bootstrap.json",
+                object: bootstrapPayload
+            ),
+            try MultiplayerArtifactFile.jsonArray(
+                kind: "session_output",
+                label: "\(labelPrefix) ordered output chunks",
+                relativePath: "replay/session/output.json",
+                array: chunkPayloads
+            ),
+            try MultiplayerArtifactFile.jsonObject(
+                kind: "session_expected_output",
+                label: "\(labelPrefix) expected output",
+                relativePath: "replay/session/expected-output.json",
+                object: expectedPayload
+            ),
+        ]
+    }
 }
 
 @MainActor
@@ -563,7 +657,8 @@ private struct MultiplayerArtifactWriter {
         runID: String,
         faults: [[String: Any]],
         events: [[String: Any]],
-        logs: [String: String]
+        logs: [String: String],
+        extraFiles: [MultiplayerArtifactFile]
     ) throws {
         let bundleRoot = root
             .appendingPathComponent("multiplayer")
@@ -611,6 +706,17 @@ private struct MultiplayerArtifactWriter {
             ])
         }
 
+        for file in extraFiles.sorted(by: { $0.relativePath < $1.relativePath }) {
+            let url = bundleRoot.appendingPathComponent(file.relativePath)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try file.data.write(to: url)
+            files.append([
+                "kind": file.kind,
+                "label": file.label,
+                "path": file.relativePath,
+            ])
+        }
+
         let manifest: [String: Any] = [
             "schema_version": "ite.verification_artifact.v1",
             "scenario": [
@@ -650,6 +756,57 @@ private struct MultiplayerArtifactWriter {
             return "room_log"
         }
         return "session_log"
+    }
+}
+
+private struct MultiplayerArtifactFile {
+    let kind: String
+    let label: String
+    let relativePath: String
+    let data: Data
+
+    static func json<T: Encodable>(
+        kind: String,
+        label: String,
+        relativePath: String,
+        encodable: T
+    ) throws -> Self {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return MultiplayerArtifactFile(
+            kind: kind,
+            label: label,
+            relativePath: relativePath,
+            data: try encoder.encode(encodable)
+        )
+    }
+
+    static func jsonObject(
+        kind: String,
+        label: String,
+        relativePath: String,
+        object: [String: Any]
+    ) throws -> Self {
+        try MultiplayerArtifactFile(
+            kind: kind,
+            label: label,
+            relativePath: relativePath,
+            data: JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+        )
+    }
+
+    static func jsonArray(
+        kind: String,
+        label: String,
+        relativePath: String,
+        array: [[String: Any]]
+    ) throws -> Self {
+        try MultiplayerArtifactFile(
+            kind: kind,
+            label: label,
+            relativePath: relativePath,
+            data: JSONSerialization.data(withJSONObject: array, options: [.prettyPrinted, .sortedKeys])
+        )
     }
 }
 
