@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-exec ./scripts/swiftpm-cache.sh test --filter CompositorStressHarnessTests
+exec ./Scripts/swiftpm-cache.sh test --filter CompositorStressHarnessTests
