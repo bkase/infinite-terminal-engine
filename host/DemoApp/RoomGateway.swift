@@ -85,8 +85,9 @@ final class RoomGateway {
         let currentRoomSeq = currentSnapshot.roomSeq
         let normalizedKnownRoomSeq = knownRoomSeq ?? 0
 
+        let catchUp: RoomGatewayCatchUp
         if knownRoomSeq == nil || normalizedKnownRoomSeq == 0 {
-            return RoomGatewayCatchUp(
+            catchUp = RoomGatewayCatchUp(
                 roomID: currentSnapshot.roomID,
                 knownRoomSeq: knownRoomSeq,
                 currentRoomSeq: currentRoomSeq,
@@ -94,10 +95,8 @@ final class RoomGateway {
                 baseSnapshot: currentSnapshot,
                 tailRecords: []
             )
-        }
-
-        if normalizedKnownRoomSeq >= currentRoomSeq {
-            return RoomGatewayCatchUp(
+        } else if normalizedKnownRoomSeq >= currentRoomSeq {
+            catchUp = RoomGatewayCatchUp(
                 roomID: currentSnapshot.roomID,
                 knownRoomSeq: knownRoomSeq,
                 currentRoomSeq: currentRoomSeq,
@@ -105,12 +104,10 @@ final class RoomGateway {
                 baseSnapshot: nil,
                 tailRecords: []
             )
-        }
-
-        if let persistedSnapshot = try snapshotStore.latestSnapshot(for: currentSnapshot.roomID)?.snapshot,
-           persistedSnapshot.roomSeq > normalizedKnownRoomSeq
+        } else if let persistedSnapshot = try snapshotStore.latestSnapshot(for: currentSnapshot.roomID)?.snapshot,
+                  persistedSnapshot.roomSeq > normalizedKnownRoomSeq
         {
-            return RoomGatewayCatchUp(
+            catchUp = RoomGatewayCatchUp(
                 roomID: currentSnapshot.roomID,
                 knownRoomSeq: knownRoomSeq,
                 currentRoomSeq: currentRoomSeq,
@@ -118,16 +115,40 @@ final class RoomGateway {
                 baseSnapshot: persistedSnapshot,
                 tailRecords: try journalStore.records(for: currentSnapshot.roomID, after: persistedSnapshot.roomSeq)
             )
+        } else {
+            catchUp = RoomGatewayCatchUp(
+                roomID: currentSnapshot.roomID,
+                knownRoomSeq: knownRoomSeq,
+                currentRoomSeq: currentRoomSeq,
+                mode: .tailOnly,
+                baseSnapshot: nil,
+                tailRecords: try journalStore.records(for: currentSnapshot.roomID, after: normalizedKnownRoomSeq)
+            )
         }
 
-        return RoomGatewayCatchUp(
-            roomID: currentSnapshot.roomID,
-            knownRoomSeq: knownRoomSeq,
-            currentRoomSeq: currentRoomSeq,
-            mode: .tailOnly,
-            baseSnapshot: nil,
-            tailRecords: try journalStore.records(for: currentSnapshot.roomID, after: normalizedKnownRoomSeq)
+        Observability.metric(
+            "room.connect_total",
+            value: 1,
+            unit: "count",
+            dimensions: [
+                "room_id": currentSnapshot.roomID.rawValue,
+                "client_id": clientID.rawValue,
+                "mode": catchUp.mode.rawValue,
+            ]
         )
+        Observability.log(
+            domain: "room",
+            component: "room-gateway",
+            event: "client_connected",
+            fields: [
+                "room_id": currentSnapshot.roomID.rawValue,
+                "client_id": clientID.rawValue,
+                "known_room_seq": knownRoomSeq.map(String.init) ?? "none",
+                "current_room_seq": String(currentRoomSeq),
+                "mode": catchUp.mode.rawValue,
+            ]
+        )
+        return catchUp
     }
 
     @discardableResult
@@ -140,6 +161,26 @@ final class RoomGateway {
             } else {
                 broadcast(.accepted(applied.record))
                 broadcastLeaseUpdates(for: applied.sideEffects)
+                Observability.metric(
+                    "room.apply_total",
+                    value: 1,
+                    unit: "count",
+                    dimensions: [
+                        "room_id": applied.record.roomID.rawValue,
+                        "client_id": clientID.rawValue,
+                    ]
+                )
+                Observability.log(
+                    domain: "room",
+                    component: "room-gateway",
+                    event: "op_applied",
+                    fields: [
+                        "room_id": applied.record.roomID.rawValue,
+                        "client_id": clientID.rawValue,
+                        "op_id": applied.record.opID.rawValue,
+                        "room_seq": String(applied.record.roomSeq ?? 0),
+                    ]
+                )
             }
             return applied
         } catch {
@@ -150,6 +191,27 @@ final class RoomGateway {
                 reason: error.localizedDescription
             )
             deliveriesByClientID[clientID, default: []].append(.rejected(reject))
+            Observability.metric(
+                "room.reject_total",
+                value: 1,
+                unit: "count",
+                dimensions: [
+                    "room_id": actor.snapshot.roomID.rawValue,
+                    "client_id": clientID.rawValue,
+                ]
+            )
+            Observability.log(
+                domain: "room",
+                component: "room-gateway",
+                event: "op_rejected",
+                level: "error",
+                fields: [
+                    "room_id": actor.snapshot.roomID.rawValue,
+                    "client_id": clientID.rawValue,
+                    "op_id": op.opID.rawValue,
+                    "reason": reject.reason,
+                ]
+            )
             throw reject
         }
     }

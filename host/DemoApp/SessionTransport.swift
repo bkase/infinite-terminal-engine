@@ -225,6 +225,28 @@ final class SessionTransportServer {
         )
         connectionsByID[connectionID] = connection
         connectionIDsBySessionID[request.sessionID, default: []].insert(connectionID)
+        Observability.metric(
+            "session.transport_connect_total",
+            value: 1,
+            unit: "count",
+            dimensions: [
+                "session_id": request.sessionID.rawValue,
+                "client_id": request.clientID.rawValue,
+                "resume_mode": resumeMode.rawValue,
+            ]
+        )
+        Observability.log(
+            domain: "session",
+            component: "session-transport",
+            event: "transport_connected",
+            fields: [
+                "session_id": request.sessionID.rawValue,
+                "client_id": request.clientID.rawValue,
+                "connection_id": connectionID,
+                "resume_mode": resumeMode.rawValue,
+                "lease_epoch": String(request.leaseEpoch),
+            ]
+        )
         return connection
     }
 
@@ -319,6 +341,27 @@ final class SessionTransportConnection {
             throw SessionTransportError.leaseRevoked(currentLeaseEpoch: currentLeaseEpoch)
         }
         try session.sendInput(frame.bytes)
+        Observability.metric(
+            "session.input_bytes",
+            value: Double(frame.bytes.count),
+            unit: "bytes",
+            dimensions: [
+                "session_id": session.sessionID.rawValue,
+                "client_id": clientID.rawValue,
+            ]
+        )
+        Observability.log(
+            domain: "session",
+            component: "session-transport",
+            event: "input_forwarded",
+            fields: [
+                "session_id": session.sessionID.rawValue,
+                "client_id": clientID.rawValue,
+                "connection_id": connectionID,
+                "client_input_seq": String(frame.clientInputSeq),
+                "bytes": String(frame.bytes.count),
+            ]
+        )
         logLines.append(
             "connection_id=\(connectionID) direction=c2s type=input client_input_seq=\(frame.clientInputSeq) bytes=\(frame.bytes.count)"
         )
@@ -343,6 +386,28 @@ final class SessionTransportConnection {
                 pendingMessages.append(message)
                 logLines.append(SessionTransportServer.describe(message, connectionID: connectionID))
                 didSendLeaseRevoked = true
+                Observability.metric(
+                    "session.lease_revoked_total",
+                    value: 1,
+                    unit: "count",
+                    dimensions: [
+                        "session_id": session.sessionID.rawValue,
+                        "client_id": clientID.rawValue,
+                    ]
+                )
+                Observability.log(
+                    domain: "session",
+                    component: "session-transport",
+                    event: "lease_revoked",
+                    level: "error",
+                    fields: [
+                        "session_id": session.sessionID.rawValue,
+                        "client_id": clientID.rawValue,
+                        "connection_id": connectionID,
+                        "previous_lease_epoch": String(authenticatedLeaseEpoch),
+                        "current_lease_epoch": String(currentLeaseEpoch),
+                    ]
+                )
             }
             throw SessionTransportError.leaseRevoked(currentLeaseEpoch: currentLeaseEpoch)
         }

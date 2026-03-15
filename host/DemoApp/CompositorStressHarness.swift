@@ -10,6 +10,46 @@ struct CompositorStressMetrics {
     let textureMemoryBytes: Int
     let averageFrameBuildMicros: Double
     let averageFrameRenderMillis: Double
+
+    func observabilityMetrics(correlationID: String) -> [ObservabilityMetric] {
+        [
+            ObservabilityMetric(
+                name: "compositor.visible_surfaces",
+                value: Double(visibleSurfaces),
+                unit: "count",
+                tsMillis: Observability.nowMillis(),
+                dimensions: ["correlation_id": correlationID]
+            ),
+            ObservabilityMetric(
+                name: "compositor.occluded_surfaces",
+                value: Double(occludedSurfaces),
+                unit: "count",
+                tsMillis: Observability.nowMillis(),
+                dimensions: ["correlation_id": correlationID]
+            ),
+            ObservabilityMetric(
+                name: "compositor.texture_memory_bytes",
+                value: Double(textureMemoryBytes),
+                unit: "bytes",
+                tsMillis: Observability.nowMillis(),
+                dimensions: ["correlation_id": correlationID]
+            ),
+            ObservabilityMetric(
+                name: "compositor.frame_build_micros",
+                value: averageFrameBuildMicros,
+                unit: "micros",
+                tsMillis: Observability.nowMillis(),
+                dimensions: ["correlation_id": correlationID]
+            ),
+            ObservabilityMetric(
+                name: "compositor.frame_render_millis",
+                value: averageFrameRenderMillis,
+                unit: "millis",
+                tsMillis: Observability.nowMillis(),
+                dimensions: ["correlation_id": correlationID]
+            ),
+        ]
+    }
 }
 
 struct PublishChurnMetrics {

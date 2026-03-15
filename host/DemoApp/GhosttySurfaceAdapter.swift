@@ -251,6 +251,11 @@ final class GhosttySurfaceAdapter: ObservableObject {
     func routePaste(_ text: String, bracketed: Bool) -> TerminalInputRoute {
         guard !text.isEmpty else { return .ignored }
         let payload = InputNormalizer.encodedPasteBytes(for: text, bracketed: bracketed)
+        GhosttyObservability.recordPasteAudit(
+            surfaceID: latestSurfaceID,
+            textByteCount: text.lengthOfBytes(using: .utf8),
+            bracketed: bracketed
+        )
         if let surface {
             text.withCString { ptr in
                 ghostty_surface_text(surface, ptr, UInt(text.lengthOfBytes(using: .utf8)))
@@ -369,6 +374,10 @@ final class GhosttySurfaceAdapter: ObservableObject {
     private func publishLatestSurfaceTexture() {
         guard let sourceTexture = makeLiveSurfaceTexture() else { return }
         texturePublisher?.publishSnapshot(from: sourceTexture)
+        GhosttyObservability.recordTexturePublishRequest(
+            surfaceID: latestSurfaceID,
+            generation: latestTextureGeneration() + 1
+        )
     }
 
     private func makeLiveSurfaceTexture() -> MTLTexture? {
@@ -477,6 +486,12 @@ final class GhosttySurfaceAdapter: ObservableObject {
         lastPixelSize = pixelSize
         let width = UInt32(max(Int(pixelSize.width), 1))
         let height = UInt32(max(Int(pixelSize.height), 1))
+        GhosttyObservability.recordResize(
+            surfaceID: latestSurfaceID,
+            width: Int(width),
+            height: Int(height),
+            backingScale: backingScale
+        )
         ghostty_surface_set_content_scale(surface, backingScale, backingScale)
         ghostty_surface_set_size(surface, width, height)
     }
@@ -493,6 +508,10 @@ final class GhosttySurfaceAdapter: ObservableObject {
                 composing: input.composing
             ))
         }
+    }
+
+    private var latestSurfaceID: String {
+        title.isEmpty ? "ghostty-surface" : title
     }
 
     static func encodeKeyBytes(_ input: GhosttyKeyInput) -> Data? {
