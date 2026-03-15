@@ -25,6 +25,8 @@ Fast vs slow lanes:
 - Slow lane: `scripts/verify-demo.sh` reruns the fast lane, verifies packaging, and performs the release host build.
 - Failure injection: `scripts/verify-commit-failure.sh host-shell` proves the hook rejects representative lane failures with specific output.
 - Ghostty vendor contract: `docs/ghostty-vendor.md` records the pinned snapshot and the wrapper-only boundary.
+- Collaborative render profiles: `host/DemoApp/Resources/RenderProfiles.json` pins the PragmataPro geometry contract used by the host.
+- Render profile behavior: `docs/render-profiles.md` documents the deterministic sizing rules and failure mode.
 
 Run locally:
 

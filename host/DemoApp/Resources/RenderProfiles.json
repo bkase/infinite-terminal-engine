@@ -1,0 +1,17 @@
+{
+  "profiles": [
+    {
+      "id": "collab-pragmata-v1",
+      "themeID": "terminal-dark-v1",
+      "pointSize": 14,
+      "cellWidth": 7,
+      "lineHeight": 16,
+      "paddingX": 10,
+      "paddingY": 10,
+      "titlebarHeight": 28,
+      "regularFontFile": "PragmataPro_Mono_R_09.ttf",
+      "boldFontFile": "PragmataPro_Mono_B_09.ttf",
+      "italicFontFile": "PragmataPro_Mono_I_09.ttf"
+    }
+  ]
+}
