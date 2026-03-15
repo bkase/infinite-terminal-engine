@@ -56,7 +56,14 @@ enum RoomStateReducer {
             uniqueKeysWithValues: snapshot.controlLeases.map { ($0.sessionID, $0.leaseEpoch) }
         )
 
-        for record in records.sorted(by: { ($0.roomSeq ?? 0) < ($1.roomSeq ?? 0) }) {
+        for record in records.enumerated().sorted(by: { lhs, rhs in
+            let lhsSeq = lhs.element.roomSeq ?? 0
+            let rhsSeq = rhs.element.roomSeq ?? 0
+            if lhsSeq == rhsSeq {
+                return lhs.offset < rhs.offset
+            }
+            return lhsSeq < rhsSeq
+        }).map(\.element) {
             let transition = try applyPayload(
                 record.payload,
                 to: currentSnapshot,
