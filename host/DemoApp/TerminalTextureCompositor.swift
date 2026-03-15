@@ -46,6 +46,15 @@ struct CanvasCamera: Equatable {
         )
     }
 
+    var viewportRect: CGRect {
+        CGRect(
+            x: CGFloat(panX),
+            y: CGFloat(panY),
+            width: CGFloat(Float(viewportWidth) / zoom),
+            height: CGFloat(Float(viewportHeight) / zoom)
+        )
+    }
+
     private func screenToCanvas(_ point: CGPoint) -> CGPoint {
         CGPoint(
             x: CGFloat(Float(point.x) / zoom + panX),

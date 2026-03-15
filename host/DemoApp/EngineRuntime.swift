@@ -91,23 +91,22 @@ final class EngineRuntime: ObservableObject {
     }
 
     private func buildFrame() -> (quads: [TerminalTextureQuad], overlays: [CanvasRect]) {
-        let orderedIDs = surfaces.orderedSurfaceIDs()
-        let quads = orderedIDs.compactMap { id -> TerminalTextureQuad? in
+        let visibleSurfaces = VisibleSurfaceList.build(
+            surfaces: surfaces,
+            profilesByID: profilesByID,
+            camera: camera
+        )
+        let quads = visibleSurfaces.compactMap { visibleSurface -> TerminalTextureQuad? in
             guard
-                let geometry = surfaces.geometry(for: id, profilesByID: profilesByID, backingScale: 1),
                 let texture = sharedTexture
             else {
                 return nil
             }
-            return TerminalTextureQuad(frame: geometry.contentFrame, texture: texture)
+            return TerminalTextureQuad(frame: visibleSurface.geometry.contentFrame, texture: texture)
         }
-        let overlays = orderedIDs.compactMap { id -> [CanvasRect]? in
-            guard
-                let geometry = surfaces.geometry(for: id, profilesByID: profilesByID, backingScale: 1),
-                let surface = surfaces.surface(id: id)
-            else {
-                return nil
-            }
+        let overlays = visibleSurfaces.compactMap { visibleSurface -> [CanvasRect]? in
+            guard let surface = surfaces.surface(id: visibleSurface.surfaceID) else { return nil }
+            let geometry = visibleSurface.geometry
 
             let bodyColor: UInt32 = surface.flags.contains(.focused) ? 0x233a_50ff : 0x1b25_34ff
             let titleColor: UInt32 = surface.flags.contains(.focused) ? 0x4d9d_e0ff : 0x3144_5dff
