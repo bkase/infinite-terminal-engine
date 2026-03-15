@@ -2,6 +2,7 @@ import Foundation
 
 enum RoomActorError: Error, Equatable, LocalizedError {
     case roomMismatch
+    case unknownProfileID(String)
     case surfaceAlreadyExists(TerminalSurfaceID)
     case surfaceNotFound(TerminalSurfaceID)
     case sessionAlreadyAttached(TerminalSurfaceID)
@@ -12,6 +13,8 @@ enum RoomActorError: Error, Equatable, LocalizedError {
         switch self {
         case .roomMismatch:
             return "room_id does not match actor room"
+        case .unknownProfileID(let profileID):
+            return "profile \(profileID) is not registered for the room"
         case .surfaceAlreadyExists(let surfaceID):
             return "surface \(surfaceID.rawValue) already exists"
         case .surfaceNotFound(let surfaceID):
@@ -229,6 +232,9 @@ final class RoomActor {
 
         switch payload {
         case .createSurface(let op):
+            guard snapshot.renderProfileIDs.contains(op.profileID) else {
+                throw RoomActorError.unknownProfileID(op.profileID)
+            }
             guard !surfaces.contains(where: { $0.id == op.surfaceID }) else {
                 throw RoomActorError.surfaceAlreadyExists(op.surfaceID)
             }

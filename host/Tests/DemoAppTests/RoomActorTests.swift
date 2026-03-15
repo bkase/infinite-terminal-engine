@@ -2,6 +2,140 @@ import XCTest
 @testable import DemoApp
 
 final class RoomActorTests: XCTestCase {
+    func testSetStackRankRewritesDenseRanksDeterministically() throws {
+        let actor = makeActor()
+
+        for (index, surfaceID) in ["surface-1", "surface-2", "surface-3"].enumerated() {
+            _ = try actor.apply(record(opID: "create-\(index)", payload: .createSurface(CreateSurfaceOp(
+                surfaceID: TerminalSurfaceID(rawValue: surfaceID),
+                xWorld: Double(index * 10),
+                yWorld: Double(index * 10),
+                cols: 80,
+                rows: 24,
+                profileID: "profile",
+                terminalTemplate: nil
+            ))))
+        }
+
+        _ = try actor.apply(record(opID: "reorder-1", payload: .setStackRank(SetStackRankOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-3"),
+            targetRank: 0
+        ))))
+        _ = try actor.apply(record(opID: "reorder-2", payload: .setStackRank(SetStackRankOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            targetRank: 99
+        ))))
+
+        XCTAssertEqual(
+            actor.snapshot.surfaces.map(\.id.rawValue),
+            ["surface-3", "surface-2", "surface-1"]
+        )
+        XCTAssertEqual(actor.snapshot.surfaces.map(\.stackRank), [0, 1, 2])
+    }
+
+    func testCloseSurfaceRewritesDenseRanks() throws {
+        let actor = makeActor()
+
+        for (index, surfaceID) in ["surface-1", "surface-2", "surface-3"].enumerated() {
+            _ = try actor.apply(record(opID: "create-\(index)", payload: .createSurface(CreateSurfaceOp(
+                surfaceID: TerminalSurfaceID(rawValue: surfaceID),
+                xWorld: Double(index * 10),
+                yWorld: Double(index * 10),
+                cols: 80,
+                rows: 24,
+                profileID: "profile",
+                terminalTemplate: nil
+            ))))
+        }
+
+        _ = try actor.apply(record(opID: "close-middle", payload: .closeSurface(CloseSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-2")
+        ))))
+
+        XCTAssertEqual(
+            actor.snapshot.surfaces.map(\.id.rawValue),
+            ["surface-1", "surface-3"]
+        )
+        XCTAssertEqual(actor.snapshot.surfaces.map(\.stackRank), [0, 1])
+    }
+
+    func testCreateSurfaceRejectsUnknownProfileID() throws {
+        let actor = makeActor()
+
+        XCTAssertThrowsError(try actor.apply(record(opID: "create-bad-profile", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "missing-profile",
+            terminalTemplate: nil
+        ))))) { error in
+            XCTAssertEqual(error as? RoomActorError, .unknownProfileID("missing-profile"))
+        }
+    }
+
+    func testResizeRejectsNonPositiveDimensions() throws {
+        let actor = makeActor()
+        _ = try actor.apply(record(opID: "create-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+
+        XCTAssertThrowsError(try actor.apply(record(opID: "resize-zero-cols", payload: .resizeSurface(ResizeSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            cols: 0,
+            rows: 24
+        ))))) { error in
+            XCTAssertEqual(error as? RoomSchemaValidationError, .nonPositiveDimension("cols"))
+        }
+    }
+
+    func testAttachAndDetachSessionTransitionsAreValidated() throws {
+        let actor = makeActor()
+        _ = try actor.apply(record(opID: "create-1", payload: .createSurface(CreateSurfaceOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            xWorld: 0,
+            yWorld: 0,
+            cols: 80,
+            rows: 24,
+            profileID: "profile",
+            terminalTemplate: nil
+        ))))
+        _ = try actor.apply(record(opID: "attach-1", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-1")
+        ))))
+
+        XCTAssertThrowsError(try actor.apply(record(opID: "attach-2", payload: .attachSession(AttachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1"),
+            sessionID: SessionID(rawValue: "session-2")
+        ))))) { error in
+            XCTAssertEqual(
+                error as? RoomActorError,
+                .sessionAlreadyAttached(TerminalSurfaceID(rawValue: "surface-1"))
+            )
+        }
+
+        _ = try actor.apply(record(opID: "detach-1", payload: .detachSession(DetachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1")
+        ))))
+
+        XCTAssertThrowsError(try actor.apply(record(opID: "detach-2", payload: .detachSession(DetachSessionOp(
+            surfaceID: TerminalSurfaceID(rawValue: "surface-1")
+        ))))) { error in
+            XCTAssertEqual(
+                error as? RoomActorError,
+                .noSessionAttached(TerminalSurfaceID(rawValue: "surface-1"))
+            )
+        }
+    }
+
     func testRoomSeqIsMonotonicAcrossAcceptedOps() throws {
         let journal = InMemoryRoomJournalStore()
         let snapshots = InMemoryRoomSnapshotStore()
@@ -154,6 +288,15 @@ final class RoomActorTests: XCTestCase {
             roomSeq: 0,
             renderProfileIDs: ["profile"],
             surfaces: []
+        )
+    }
+
+    private func makeActor(snapshotInterval: UInt64 = 100) -> RoomActor {
+        RoomActor(
+            snapshot: emptySnapshot(),
+            journalStore: InMemoryRoomJournalStore(),
+            snapshotStore: InMemoryRoomSnapshotStore(),
+            snapshotInterval: snapshotInterval
         )
     }
 
